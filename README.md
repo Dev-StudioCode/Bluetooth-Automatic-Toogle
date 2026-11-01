@@ -13,25 +13,25 @@ A [Windhawk](https://windhawk.net/) tool mod for Windows 10 and 11 that automati
 ## 💡 The Problem It Solves
 
 Many Windows users experience recurring Bluetooth adapter or peripheral glitches following a cold boot or system startup:
-* **Headphones / Earbuds Not Auto-Connecting:** Wireless audio devices (AirPods, Sony, Bose, etc.) fail to handshake cleanly on startup until Bluetooth is manually turned off and on in the Action Center.
-* **Peripheral Sleep Glitches:** Bluetooth mice, keyboards, and game controllers remain in an unresponsive sleep state when Windows boots with Fast Startup enabled.
-* **Unnecessary Cycling When Idle:** Blindly toggling Bluetooth on boot when no device is paired or in use wastes time and hardware power.
+* **Peripheral Wakeup & Audio Glitches:** Bluetooth audio devices (AirPods, Sony, Bose, etc.) and peripherals (mice, keyboards) often show as "connected" on boot but remain unresponsive, produce no audio, or suffer high latency until Bluetooth is power-cycled.
+* **Driver Stack Unresponsiveness:** Certain Bluetooth adapter drivers fail to properly initialize the audio sink or input channel on fresh boots with Fast Startup enabled.
+* **Unnecessary Cycling When Idle:** Blindly toggling Bluetooth on boot when no device is paired or in use wastes time and interrupts clean starts.
 
-**Bluetooth Auto Toggle** intelligently solves this: as soon as Windhawk starts up on boot, it monitors for any connected Bluetooth peripheral (headset, mouse, keyboard, gamepad, etc.). The moment a device is found, it waits a configurable few seconds settle time, smoothly cycles the Bluetooth radio off and back on in milliseconds, and allows all your devices to establish a fresh, pristine connection.
+**Bluetooth Auto Toggle** intelligently solves this: as soon as Windhawk starts up on boot, it monitors for any connected Bluetooth peripheral (headset, mouse, keyboard, gamepad, etc.). The moment a device is found, it waits a configurable few seconds settle time, cleanly cycles only active Bluetooth radios off and back on in milliseconds, and allows all your devices to establish a fresh, pristine connection.
 
 ---
 
 ## ✨ Key Features
 
 * 🎯 **Device-Aware Activation (New in v1.1.0):** Only triggers the off/on cycle if a connected Bluetooth device is detected (or when one connects), avoiding blind toggles when no devices are in use.
-* ⏱️ **Configurable Post-Connection Delay:** Waits a configurable "within seconds" duration (default: 2 seconds) after a device is detected before executing the toggle to ensure the connection has settled.
+* ⏱️ **Configurable Post-Connection Delay:** Waits a configurable duration (default: 2 seconds) after a device is detected before executing the toggle to ensure the connection has settled.
 * ⚡ **Millisecond Toggle Precision:** Full control over startup settle timing and off-to-on toggle duration in milliseconds.
 * 🛡️ **Isolated Tool Mod Architecture:** Runs in an isolated `windhawk.exe` background tool process without injecting into or hooking `explorer.exe` or any critical system shell components.
 * 🔄 **Cold Boot Hardware Retry:** Automatically retries radio discovery if the Windows Bluetooth stack (`bthserv`) or adapter driver is still initializing during early boot.
-* 📶 **Multi-Adapter Support:** Automatically identifies and safely cycles all available Bluetooth radios on the machine.
-* 🔒 **Session-Safe Execution:** Uses a named session mutex to ensure Bluetooth only cycles once per logon session, preventing repeated toggling if Windhawk is restarted.
-* 🧪 **Live Testing via Settings:** Includes a dedicated setting to trigger a test toggle right from the Windhawk Settings UI without needing to restart Windows.
-* 🛑 **Instant & Safe Unload:** Uses event-driven synchronization (`g_hStopEvent`) instead of blocking sleep calls, guaranteeing instant cancellation on mod reload or shutdown.
+* 📶 **State-Safe Cycling:** Inspects radio power state before cycling and only touches radios that are currently powered ON (leaving radios in Airplane mode or disabled untouched).
+* 🔒 **Session-Safe Execution:** Uses Windows Terminal Services (WTS) logon timestamps in persistent Windhawk storage to ensure Bluetooth only cycles once per logon session, surviving tool process restarts.
+* 🧪 **Live Testing via Settings:** Includes a dedicated setting to trigger a test toggle right from the Windhawk Settings UI without needing to restart Windows (bypasses session tracking and device checks).
+* 🛑 **Safe Power Restoration:** Minimizes the off window and guarantees powering cycled radios back ON with retries even if the mod is unloaded mid-cycle.
 
 ---
 
