@@ -2,131 +2,103 @@
 
 [![Windhawk Mod](https://img.shields.io/badge/Windhawk-Mod-0078D6.svg)](https://windhawk.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](#version-history)
-[![Architecture](https://img.shields.io/badge/Architecture-x64-success.svg)](#technical-details)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](#specifications)
+[![Architecture](https://img.shields.io/badge/Architecture-x64-success.svg)](#specifications)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A [Windhawk](https://windhawk.net/) tool mod for Windows 10 and 11 that automatically cycles Bluetooth **OFF** and back **ON** (in milliseconds) whenever Windhawk boots with your system and a connected Bluetooth device is detected.
+A [Windhawk](https://windhawk.net/) tool mod for Windows 10 and 11 that automatically cycles Bluetooth adapter power off and back on in milliseconds when Windhawk boots and a connected Bluetooth peripheral is detected.
 
 ---
 
-## 💡 The Problem It Solves
+## Overview and Problem Statement
 
-Many Windows users experience recurring Bluetooth adapter or peripheral glitches following a cold boot or system startup:
-* **Peripheral Wakeup & Audio Glitches:** Bluetooth audio devices (AirPods, Sony, Bose, etc.) and peripherals (mice, keyboards) often show as "connected" on boot but remain unresponsive, produce no audio, or suffer high latency until Bluetooth is power-cycled.
-* **Driver Stack Unresponsiveness:** Certain Bluetooth adapter drivers fail to properly initialize the audio sink or input channel on fresh boots with Fast Startup enabled.
-* **Unnecessary Cycling When Idle:** Blindly toggling Bluetooth on boot when no device is paired or in use wastes time and interrupts clean starts.
+On Windows 10 and 11 systems—especially those utilizing Fast Startup—Bluetooth adapters and paired wireless peripherals can encounter driver initialization and power-state synchronization issues following a system boot:
 
-**Bluetooth Auto Toggle** intelligently solves this: as soon as Windhawk starts up on boot, it monitors for any connected Bluetooth peripheral (headset, mouse, keyboard, gamepad, etc.). The moment a device is found, it waits a configurable few seconds settle time, cleanly cycles only active Bluetooth radios off and back on in milliseconds, and allows all your devices to establish a fresh, pristine connection.
+* **Peripheral Wakeup and Audio Pipeline Failures:** Wireless audio endpoints (such as headphones and earbuds) and HID peripherals (mice and keyboards) often display a "Connected" status in Windows while remaining completely unresponsive, failing to route audio, or suffering severe input latency until the Bluetooth radio is power-cycled.
+* **Driver Stack Unresponsiveness:** Certain Bluetooth controller drivers fail to reinitialize audio sinks or profile channels cleanly upon cold boots without a manual radio restart via the Windows Action Center or Settings.
+* **Redundant Cycling on Idle Systems:** Blindly power-cycling Bluetooth on every startup when no device is paired or actively connected introduces unnecessary radio transitions.
 
----
-
-## ✨ Key Features
-
-* 🎯 **Device-Aware Activation (New in v1.1.0):** Only triggers the off/on cycle if a connected Bluetooth device is detected (or when one connects), avoiding blind toggles when no devices are in use.
-* ⏱️ **Configurable Post-Connection Delay:** Waits a configurable duration (default: 2 seconds) after a device is detected before executing the toggle to ensure the connection has settled.
-* ⚡ **Millisecond Toggle Precision:** Full control over startup settle timing and off-to-on toggle duration in milliseconds.
-* 🛡️ **Isolated Tool Mod Architecture:** Runs in an isolated `windhawk.exe` background tool process without injecting into or hooking `explorer.exe` or any critical system shell components.
-* 🔄 **Cold Boot Hardware Retry:** Automatically retries radio discovery if the Windows Bluetooth stack (`bthserv`) or adapter driver is still initializing during early boot.
-* 📶 **State-Safe Cycling:** Inspects radio power state before cycling and only touches radios that are currently powered ON (leaving radios in Airplane mode or disabled untouched).
-* 🔒 **Session-Safe Execution:** Uses Windows Terminal Services (WTS) logon timestamps in persistent Windhawk storage to ensure Bluetooth only cycles once per logon session, surviving tool process restarts.
-* 🧪 **Live Testing via Settings:** Includes a dedicated setting to trigger a test toggle right from the Windhawk Settings UI without needing to restart Windows (bypasses session tracking and device checks).
-* 🛑 **Safe Power Restoration:** Minimizes the off window and guarantees powering cycled radios back ON with retries even if the mod is unloaded mid-cycle.
+**Bluetooth Auto Toggle** addresses these issues systematically: when Windhawk launches at user logon, the mod observes connected Bluetooth devices through Advanced Query Syntax (AQS) queries. Once a connected device is detected, the mod allows a configurable settle interval for hardware drivers, cycles active Bluetooth radios off and back on within configurable milliseconds, and ensures uninterrupted device reconnection.
 
 ---
 
-## 🚀 How to Use in Windhawk
+## Key Features
 
-### Step 1: Enable Developer Mode in Windhawk
-1. Launch the **Windhawk** application on your PC.
-2. Open **Settings** (gear icon) in the navigation menu.
-3. Check the box for **"Developer mode"** (or open the **Developer** tab).
+* **Device-Aware Activation:** Evaluates device connectivity before initiating cycling, ensuring that idle systems without connected peripherals are not cycled unnecessarily.
+* **Configurable Post-Connection Settle Delay:** Introduces a configurable delay (default: 2,000 ms) after device detection to ensure the driver stack and profile layers have settled before executing the toggle.
+* **Millisecond Precision Control:** Provides granular configuration over startup settle timing, discovery retry intervals, and radio off-to-on duration in milliseconds.
+* **Isolated Tool Mod Architecture:** Executes inside an isolated, dedicated `windhawk.exe` background process using official Windhawk tool mod conventions, preventing any injection into `explorer.exe` or the Windows desktop shell.
+* **Hardware Stack Cold-Boot Discovery:** Implements exponential-like discovery retry polling to handle scenarios where the Windows Bluetooth service (`bthserv`) or physical adapter initialization is delayed during startup.
+* **State-Safe Radio Operation:** Inspects the active power state of each radio (`RadioState::On`) prior to cycling, ensuring that radios in Airplane mode or administratively disabled states remain untouched.
+* **Persistent Session Deduplication:** Employs Windows Terminal Services (WTS) logon timestamps coupled with persistent Windhawk binary storage (`Wh_GetBinaryValue` / `Wh_SetBinaryValue`) to ensure the mod executes only once per logon session, surviving tool process restarts.
+* **Safe Power Restoration:** Ensures radios are commanded back on with retries even if the mod is unloaded or interrupted mid-cycle, eliminating scenarios where Bluetooth is left disabled.
+* **Live Configuration Testing:** Supports on-demand verification through the `forceToggleOnSettingsChange` setting, allowing immediate testing from the Windhawk configuration interface without requiring a system reboot.
 
-### Step 2: Add and Compile the Mod
-1. In the **Developer** tab, click **"New mod"**.
-2. Replace the editor's default template code with the full contents of [`bluetooth-auto-toggle.wh.cpp`](./bluetooth-auto-toggle.wh.cpp).
-3. Click the **"Compile and inject"** (or **"Compile and test"**) button in the top-right corner.
-4. Windhawk will compile the mod using Clang and execute it in a dedicated background tool process (`windhawk.exe`).
+---
 
-### Step 3: Configure Settings
-Once compiled, switch to the mod's **Settings** tab in Windhawk to customize timings to your hardware:
+## Installation and Configuration
+
+### Prerequisites
+1. Windows 10 (version 1809 or later) or Windows 11.
+2. [Windhawk](https://windhawk.net/) (v1.4 or later recommended).
+
+### Adding the Mod to Windhawk
+1. Open the **Windhawk** application.
+2. Navigate to **Settings** (gear icon) and verify **Developer mode** is enabled under the Developer tab.
+3. In the **Developer** tab, select **New Mod**.
+4. Replace the default template with the complete contents of [`bluetooth-auto-toggle.wh.cpp`](./bluetooth-auto-toggle.wh.cpp).
+5. Click **Compile and inject** (or **Compile and test**) in the top-right toolbar. Windhawk will compile the source code via Clang and launch the tool process.
+
+### Configuration Settings Reference
+
+Settings can be customized directly within the mod details view in Windhawk:
 
 | Setting | Default | Description |
 | :--- | :---: | :--- |
-| **Only When Device Connected** | `true` | When enabled, Bluetooth is only cycled after a connected Bluetooth device is found. If disabled, Bluetooth cycles on startup regardless of connected devices. |
-| **Delay After Device Found (ms)** | `2000` | Settle duration in milliseconds to wait after a connected device is detected before executing the off-and-on cycle. |
-| **Device Connection Wait Timeout (seconds)** | `60` | Maximum seconds to wait for a Bluetooth device to connect after startup (`0` for indefinite wait until a device connects). |
-| **Startup Settle Delay (ms)** | `2000` | Milliseconds to wait after Windhawk starts before querying Bluetooth (gives hardware drivers time to settle on cold boot). |
-| **Toggle Off-to-On Duration (ms)** | `500` | Duration the radio remains powered OFF before being turned back ON. |
-| **Radio Detection Retries** | `10` | Maximum discovery attempts if the Bluetooth radio is not immediately enumerated. |
-| **Radio Retry Interval (ms)** | `500` | Milliseconds between radio discovery retries. |
-| **Toggle Only Once Per Logon Session** | `true` | Prevents re-cycling Bluetooth if Windhawk UI is restarted during the same Windows session. |
-| **Re-toggle on Settings Save** | `false` | When enabled, saving settings in Windhawk immediately executes a test toggle. |
+| **Only When Device Connected** | `true` | Restricts cycling to sessions where an active Bluetooth device is present. If disabled, cycling proceeds on startup unconditionally. |
+| **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
+| **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
+| **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
+| **Toggle Off-to-On Duration (ms)** | `500` | Duration in milliseconds the radio remains powered off before issuing the power-on command. |
+| **Radio Detection Retries** | `10` | Maximum retry count for radio discovery if the Bluetooth adapter is not immediately reported by the system. |
+| **Radio Retry Interval (ms)** | `500` | Interval in milliseconds between discovery attempts. |
+| **Toggle Only Once Per Logon Session** | `true` | Prevents redundant execution if Windhawk restarts or settings are reloaded within the same Windows session. |
+| **Re-toggle on Settings Save** | `false` | Bypasses session markers, startup delays, and device checks to perform an immediate diagnostic cycle when settings are saved. |
 
 ---
 
-## 🛠️ Technical Architecture & Design Safeguards
+## Technical Architecture and Implementation
 
-This mod was engineered to eliminate common pitfalls associated with system-level radio manipulation:
+The mod is engineered to meet strict system-stability and driver-safety requirements:
 
-1. **Dedicated Process Isolation (Windhawk Tool Mod)**
-   - Utilizes Windhawk's official tool mod pattern (`@include windhawk.exe`).
-   - Does not hook or inject into `explorer.exe`, eliminating any possibility of shell crashes or Taskbar instability.
-2. **Asynchronous Non-Blocking Initialization**
-   - Windhawk's `Wh_ModInit` returns `TRUE` immediately.
-   - All async discovery, waits, and state transitions run inside a dedicated background worker thread (`CreateThread`), preventing watchdog timeout terminations.
-3. **Hardware State Transition Settle Time**
-   - Instantaneous 0 ms toggling can cause Bluetooth firmware to drop commands or return `AccessDenied`.
-   - The configurable `toggleDelayMs` ensures the physical radio fully enters power-down before receiving the power-up command.
-4. **Modern Windows Runtime (C++/WinRT) Projections**
-   - Interacts directly with `Windows.Devices.Radios.Radio`, `Windows.Devices.Bluetooth.BluetoothDevice`, and `Windows.Devices.Enumeration.DeviceInformation`.
-   - Hosted in a Multi-Threaded Apartment (`winrt::init_apartment(apartment_type::multi_threaded)`).
-   - All API calls are protected by structured `winrt::hresult_error` handlers.
+1. **Process Isolation**
+   - Configured via `@include windhawk.exe` to run exclusively as a companion tool process.
+   - Decoupled from Windows Explorer and core OS UI components to eliminate shell instability risks.
 
----
+2. **Asynchronous Non-Blocking Execution**
+   - Mod initialization (`Wh_ModInit` / `WhTool_ModInit`) completes immediately, avoiding OS watchdog timeouts.
+   - All polling, WinRT async invocations, and wait states execute on a dedicated background worker thread (`BluetoothWorkerThread`) initialized within a Multi-Threaded Apartment (MTA).
 
-## 📦 Working with GitHub
+3. **Hardware State Transition Safety**
+   - Instantaneous 0 ms radio toggling can cause Bluetooth firmware or hardware controllers to reject commands (`RadioAccessStatus::Denied`).
+   - The configurable `toggleDelayMs` ensures physical radios enter full low-power state before receiving the power-on instruction.
 
-### Hosting in Your Own Repository
-```bash
-git init
-git add .
-git commit -m "feat: release v1.1.0 with device-aware toggle and millisecond control"
-git branch -M main
-git remote add origin https://github.com/<your-username>/bluetooth-automatic-toggle.git
-git push -u origin main
-```
-
-### Contributing to the Official Windhawk Catalog
-To make this mod available for one-click installation to all Windhawk users worldwide:
-1. Fork the official Windhawk repository: [ramensoftware/windhawk-mods](https://github.com/ramensoftware/windhawk-mods).
-2. Clone your fork locally:
-   ```bash
-   git clone https://github.com/<your-username>/windhawk-mods.git
-   cd windhawk-mods
-   ```
-3. Copy [`bluetooth-auto-toggle.wh.cpp`](./bluetooth-auto-toggle.wh.cpp) into the `mods/` directory:
-   ```bash
-   cp "d:\#Anti Gravity\Windhalk\Bluetooth-Automatic-Toogle\bluetooth-auto-toggle.wh.cpp" mods/
-   ```
-4. Commit, push, and submit a Pull Request:
-   ```bash
-   git checkout -b add-bluetooth-auto-toggle
-   git add mods/bluetooth-auto-toggle.wh.cpp
-   git commit -m "Add Bluetooth Auto Toggle mod v1.1.0"
-   git push origin add-bluetooth-auto-toggle
-   ```
+4. **Exception Handling and Resiliency**
+   - Direct WinRT API access (`Windows.Devices.Radios.Radio`, `Windows.Devices.Bluetooth.BluetoothDevice`, `Windows.Devices.Enumeration.DeviceInformation`) is wrapped in structured `try...catch` handlers.
+   - Radio names and references are cached to avoid unhandled `winrt::hresult_error` exceptions during power-down transitions.
 
 ---
 
-## 📋 Technical Details
-* **Target Process:** `windhawk.exe` (dedicated standalone tool process)
-* **Compiler:** Clang / LLVM (MinGW-w64) via Windhawk Compiler toolchain
-* **Required Libraries:** `-lole32 -loleaut32 -lruntimeobject -lshell32`
-* **Windows API:** Modern Windows Runtime (`Windows.Devices.Radios`, `Windows.Devices.Bluetooth`, `Windows.Devices.Enumeration`)
-* **Resource Impact:** Zero idle CPU consumption; shuts down or sleeps on event handles when idle.
+## Specifications
+
+* **Target Process:** `windhawk.exe` (dedicated tool mod process)
+* **Toolchain:** Clang / LLVM (MinGW-w64 target) via the Windhawk Compiler suite
+* **Compiler Flags / Dependencies:** `-lole32 -loleaut32 -lruntimeobject -lshell32 -lwtsapi32`
+* **Windows Runtime APIs:** `Windows.Devices.Radios`, `Windows.Devices.Bluetooth`, `Windows.Devices.Enumeration`
+* **Resource Profile:** Zero idle CPU consumption; sleeps on OS event handles (`g_hStopEvent`, `g_hTriggerEvent`) when not cycling.
 
 ---
 
-## 📄 License
+## License
+
 This project is licensed under the [MIT License](LICENSE).
