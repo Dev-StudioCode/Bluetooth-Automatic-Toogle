@@ -1,8 +1,7 @@
 // ==WindhawkMod==
 // @id              bluetooth-auto-toggle
 // @name            Bluetooth Auto Toggle
-// @description     Automatically cycles Bluetooth off and back on in
-// milliseconds when a connected device is detected at startup
+// @description     Automatically cycles Bluetooth off and back on in milliseconds when a connected device is detected at startup
 // @version         1.1.0
 // @author          Dev-StudioCode
 // @github          https://github.com/Dev-StudioCode
@@ -53,53 +52,42 @@ reload, and instant cancellation on shutdown.
 /*
 - activationMode: deviceConnected
   $name: Activation Mode
-  $description: >-
-    Choose when the Bluetooth cycle occurs: only after a connected Bluetooth
-    device is detected, or as soon as Windows starts (turn ON -> OFF -> finally ON).
+  $description: Choose when the Bluetooth cycle occurs: only after a connected Bluetooth device is detected, or as soon as Windows starts (turn ON -> OFF -> finally ON).
   $options:
   - deviceConnected: Only when a device is connected
   - startup: On Windows startup (Turn ON -> OFF -> finally ON)
 
 - delayAfterDeviceConnectedMs: 2000
   $name: Delay After Device Found (ms)
-  $description: Milliseconds to wait after a connected device is detected before
-executing the off-and-on cycle (minimum 0 ms, used in device-connected mode).
+  $description: Milliseconds to wait after a connected device is detected before executing the off-and-on cycle (minimum 0 ms, used in device-connected mode).
 
 - deviceWaitTimeoutSec: 60
   $name: Device Connection Wait Timeout (seconds)
-  $description: Maximum seconds to wait for a Bluetooth device to connect after
-startup (0 for indefinite/infinite wait until a device connects).
+  $description: Maximum seconds to wait for a Bluetooth device to connect after startup (0 for indefinite/infinite wait until a device connects).
 
 - startupDelayMs: 2000
   $name: Startup Settle Delay (ms)
-  $description: Milliseconds to wait after Windhawk starts before beginning
-checks (allows the driver stack to settle, minimum 0 ms).
+  $description: Milliseconds to wait after Windhawk starts before beginning checks (allows the driver stack to settle, minimum 0 ms).
 
 - toggleDelayMs: 500
   $name: Toggle Off-to-On Duration (ms)
-  $description: Duration in milliseconds the Bluetooth radio remains OFF before
-turning back ON (minimum 50 ms).
+  $description: Duration in milliseconds the Bluetooth radio remains OFF before turning back ON (minimum 50 ms).
 
 - maxRetries: 10
   $name: Radio Detection Retries
-  $description: Number of attempts to locate the Bluetooth radio if not
-immediately enumerated on cold boot (minimum 1).
+  $description: Number of attempts to locate the Bluetooth radio if not immediately enumerated on cold boot (minimum 1).
 
 - retryIntervalMs: 500
   $name: Radio Retry Interval (ms)
-  $description: Milliseconds to wait between radio discovery retry attempts
-(minimum 50 ms).
+  $description: Milliseconds to wait between radio discovery retry attempts (minimum 50 ms).
 
 - onlyOncePerSession: true
   $name: Toggle Only Once Per Logon Session
-  $description: Prevents re-cycling Bluetooth if Windhawk is restarted or
-updated during the same Windows logon session.
+  $description: Prevents re-cycling Bluetooth if Windhawk is restarted or updated during the same Windows logon session.
 
 - forceToggleOnSettingsChange: false
   $name: Re-toggle on Settings Save
-  $description: If enabled, saving settings in Windhawk will immediately trigger
-a Bluetooth off-on toggle test (bypassing session check, startup delay, and
-connected device check).
+  $description: If enabled, saving settings in Windhawk will immediately trigger a Bluetooth off-on toggle test (bypassing session check, startup delay, and connected device check).
 */
 // ==/WindhawkModSettings==
 
