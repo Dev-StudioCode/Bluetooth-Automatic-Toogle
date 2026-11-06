@@ -2,7 +2,7 @@
 
 [![Windhawk Mod](https://img.shields.io/badge/Windhawk-Mod-0078D6.svg)](https://windhawk.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](#specifications)
+[![Version](https://img.shields.io/badge/Version-1.2.0-green.svg)](#specifications)
 [![Architecture](https://img.shields.io/badge/Architecture-x64-success.svg)](#specifications)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -12,7 +12,7 @@ A [Windhawk](https://windhawk.net/) tool mod for Windows 10 and 11 that automati
 
 ## Overview and Problem Statement
 
-On Windows 10 and 11 systems—especially those utilizing Fast Startup—Bluetooth adapters and paired wireless peripherals can encounter driver initialization and power-state synchronization issues following a system boot:
+On Windows 10 and 11 systems especially those utilizing Fast Startup Bluetooth adapters and paired wireless peripherals can encounter driver initialization and power-state synchronization issues following a system boot:
 
 * **Peripheral Wakeup and Audio Pipeline Failures:** Wireless audio endpoints (such as headphones and earbuds) and HID peripherals (mice and keyboards) often display a "Connected" status in Windows while remaining completely unresponsive, failing to route audio, or suffering severe input latency until the Bluetooth radio is power-cycled.
 * **Driver Stack Unresponsiveness:** Certain Bluetooth controller drivers fail to reinitialize audio sinks or profile channels cleanly upon cold boots without a manual radio restart via the Windows Action Center or Settings.
