@@ -52,7 +52,7 @@ reload, and instant cancellation on shutdown.
 /*
 - activationMode: deviceConnected
   $name: Activation Mode
-  $description: Choose when the Bluetooth cycle occurs: only after a connected Bluetooth device is detected, or as soon as Windows starts (turn ON -> OFF -> finally ON).
+  $description: Choose when the Bluetooth cycle occurs (only after a connected Bluetooth device is detected, or as soon as Windows starts).
   $options:
   - deviceConnected: Only when a device is connected
   - startup: On Windows startup (Turn ON -> OFF -> finally ON)
