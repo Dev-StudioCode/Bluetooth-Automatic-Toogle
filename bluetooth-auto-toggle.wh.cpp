@@ -51,6 +51,14 @@ reload, and instant cancellation on shutdown.
 
 // ==WindhawkModSettings==
 /*
+- startupBluetoothState: on
+  $name: Startup Bluetooth State
+  $description: Choose whether Bluetooth should be forced ON or OFF when Windows starts (regardless of state before shutdown).
+  $options:
+  - on: Turn Bluetooth ON at startup
+  - off: Turn Bluetooth OFF at startup (triggers fast toggle if turned ON later)
+  - unchanged: Keep previous Windows state (do not force ON or OFF)
+
 - activationMode: startup
   $name: Activation Mode
   $description: Choose when the Bluetooth cycle occurs (on startup / manual turn-on, or only after a device is connected).
@@ -117,12 +125,19 @@ using namespace winrt::Windows::Devices::Enumeration;
 using namespace winrt::Windows::Devices::Bluetooth;
 using namespace winrt::Windows::Devices::Radios;
 
+enum class StartupBluetoothState {
+  On,
+  Off,
+  Unchanged
+};
+
 enum class ActivationMode {
-  DeviceConnected,
-  Startup
+  Startup,
+  DeviceConnected
 };
 
 struct Settings {
+  StartupBluetoothState startupBluetoothState;
   ActivationMode activationMode;
   int delayAfterDeviceConnectedMs;
   int deviceWaitTimeoutSec;
@@ -142,6 +157,7 @@ static HANDLE g_hStopEvent = NULL;
 static HANDLE g_hTriggerEvent = NULL;
 static std::atomic<bool> g_forceNextRun{false};
 static std::atomic<bool> g_isCycling{false};
+static std::atomic<bool> g_startupStateEnforced{false};
 
 struct RadioSubscription {
   Radio radio{nullptr};
@@ -166,6 +182,26 @@ static void UnsubscribeRadioStateChanged() {
 
 static void LoadSettings() {
   AcquireSRWLockExclusive(&g_settingsLock);
+
+  PCWSTR stateStr = Wh_GetStringSetting(L"startupBluetoothState");
+  if (stateStr && *stateStr) {
+    if (wcscmp(stateStr, L"off") == 0) {
+      g_settings.startupBluetoothState = StartupBluetoothState::Off;
+    } else if (wcscmp(stateStr, L"unchanged") == 0) {
+      g_settings.startupBluetoothState = StartupBluetoothState::Unchanged;
+    } else {
+      g_settings.startupBluetoothState = StartupBluetoothState::On;
+    }
+    Wh_FreeStringSetting(stateStr);
+  } else {
+    // Backward compatibility if ensureBluetoothOnAtStartup was saved
+    int ensureOn = Wh_GetIntSetting(L"ensureBluetoothOnAtStartup");
+    if (ensureOn == 0 && Wh_GetStringSetting(L"ensureBluetoothOnAtStartup") != nullptr) {
+      g_settings.startupBluetoothState = StartupBluetoothState::Unchanged;
+    } else {
+      g_settings.startupBluetoothState = StartupBluetoothState::On;
+    }
+  }
 
   PCWSTR modeStr = Wh_GetStringSetting(L"activationMode");
   if (modeStr && *modeStr) {
@@ -204,8 +240,13 @@ static void LoadSettings() {
 
   ReleaseSRWLockExclusive(&g_settingsLock);
 
-  Wh_Log(L"Settings: mode=%s, delayAfterConn=%dms, "
+  Wh_Log(L"Settings: startupState=%s, mode=%s, delayAfterConn=%dms, "
          L"waitTimeout=%ds, startupDelay=%dms, toggleDelay=%dms, onlyOnce=%d",
+         g_settings.startupBluetoothState == StartupBluetoothState::Off
+             ? L"off"
+             : (g_settings.startupBluetoothState == StartupBluetoothState::Unchanged
+                    ? L"unchanged"
+                    : L"on"),
          g_settings.activationMode == ActivationMode::Startup ? L"startup"
                                                               : L"deviceConnected",
          g_settings.delayAfterDeviceConnectedMs,
@@ -292,54 +333,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
   }
 
-  // If configured to only toggle when a device is connected (bypassed on manual
-  // test):
-  if (!isManualTest && cfg.activationMode == ActivationMode::DeviceConnected) {
-    Wh_Log(L"Monitoring for connected Bluetooth device (timeout: %d s)...",
-           cfg.deviceWaitTimeoutSec);
-    std::wstring connectedDeviceName;
-    DWORD startTick = GetTickCount();
-
-    while (true) {
-      if (WaitForSingleObject(g_hStopEvent, 0) == WAIT_OBJECT_0) {
-        return;
-      }
-
-      if (GetFirstConnectedBluetoothDevice(connectedDeviceName)) {
-        Wh_Log(L"Connected Bluetooth device detected: \"%s\"",
-               connectedDeviceName.c_str());
-        break;
-      }
-
-      if (cfg.deviceWaitTimeoutSec > 0) {
-        DWORD elapsedSec = (GetTickCount() - startTick) / 1000;
-        if (elapsedSec >= (DWORD)cfg.deviceWaitTimeoutSec) {
-          Wh_Log(L"No Bluetooth device connected within timeout window (%d s). "
-                 L"Skipping toggle.",
-                 cfg.deviceWaitTimeoutSec);
-          return;
-        }
-      }
-
-      // Wait 1 second before re-checking, or until stop event
-      if (WaitForSingleObject(g_hStopEvent, 1000) == WAIT_OBJECT_0) {
-        return;
-      }
-    }
-
-    // Wait configured settle delay after device is found (the "within seconds"
-    // settle time)
-    if (cfg.delayAfterDeviceConnectedMs > 0) {
-      Wh_Log(L"Waiting %d ms settle time after device connection before "
-             L"toggling...",
-             cfg.delayAfterDeviceConnectedMs);
-      if (WaitForSingleObject(g_hStopEvent, cfg.delayAfterDeviceConnectedMs) ==
-          WAIT_OBJECT_0) {
-        return;
-      }
-    }
-  }
-
   // Locate Bluetooth radio(s) with retries
   std::vector<Radio> targetRadios;
   for (int attempt = 1; attempt <= cfg.maxRetries; ++attempt) {
@@ -388,6 +381,37 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     return;
   }
 
+  // Apply configured startup Bluetooth power state on initial startup
+  if (!isManualTest && !g_startupStateEnforced.exchange(true)) {
+    if (cfg.startupBluetoothState == StartupBluetoothState::On) {
+      for (const auto &radio : targetRadios) {
+        try {
+          if (radio.State() != RadioState::On) {
+            std::wstring name = radio.Name().c_str();
+            Wh_Log(L"Adapter \"%s\" is not ON at startup. Powering ON as configured...",
+                   name.c_str());
+            radio.SetStateAsync(RadioState::On).get();
+            Sleep(200);
+          }
+        } catch (...) {
+        }
+      }
+    } else if (cfg.startupBluetoothState == StartupBluetoothState::Off) {
+      for (const auto &radio : targetRadios) {
+        try {
+          if (radio.State() == RadioState::On) {
+            std::wstring name = radio.Name().c_str();
+            Wh_Log(L"Adapter \"%s\" is ON at startup. Powering OFF as configured...",
+                   name.c_str());
+            radio.SetStateAsync(RadioState::Off).get();
+            Sleep(100);
+          }
+        } catch (...) {
+        }
+      }
+    }
+  }
+
   // Check if any target radio is currently ON
   bool anyRadioOn = false;
   for (const auto &radio : targetRadios) {
@@ -400,9 +424,9 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
   }
 
-  // If in Startup mode and Bluetooth is currently OFF, wait for manual turn-on
-  if (!anyRadioOn && !isManualTest && cfg.activationMode == ActivationMode::Startup) {
-    Wh_Log(L"Bluetooth is currently OFF at startup. Listening for manual turn-on to trigger fast toggle...");
+  // If Bluetooth is currently OFF, wait for manual turn-on to trigger fast toggle
+  if (!anyRadioOn && !isManualTest) {
+    Wh_Log(L"Bluetooth is currently OFF. Listening for manual turn-on to trigger fast toggle...");
     UnsubscribeRadioStateChanged();
     AcquireSRWLockExclusive(&g_subscriptionsLock);
     for (const auto &radio : targetRadios) {
@@ -424,6 +448,52 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
     ReleaseSRWLockExclusive(&g_subscriptionsLock);
     return;
+  }
+
+  // If configured to only toggle when a device is connected (bypassed on manual test):
+  if (!isManualTest && cfg.activationMode == ActivationMode::DeviceConnected) {
+    Wh_Log(L"Monitoring for connected Bluetooth device (timeout: %d s)...",
+           cfg.deviceWaitTimeoutSec);
+    std::wstring connectedDeviceName;
+    DWORD startTick = GetTickCount();
+
+    while (true) {
+      if (WaitForSingleObject(g_hStopEvent, 0) == WAIT_OBJECT_0) {
+        return;
+      }
+
+      if (GetFirstConnectedBluetoothDevice(connectedDeviceName)) {
+        Wh_Log(L"Connected Bluetooth device detected: \"%s\"",
+               connectedDeviceName.c_str());
+        break;
+      }
+
+      if (cfg.deviceWaitTimeoutSec > 0) {
+        DWORD elapsedSec = (GetTickCount() - startTick) / 1000;
+        if (elapsedSec >= (DWORD)cfg.deviceWaitTimeoutSec) {
+          Wh_Log(L"No Bluetooth device connected within timeout window (%d s). "
+                 L"Skipping toggle.",
+                 cfg.deviceWaitTimeoutSec);
+          return;
+        }
+      }
+
+      // Wait 1 second before re-checking, or until stop event
+      if (WaitForSingleObject(g_hStopEvent, 1000) == WAIT_OBJECT_0) {
+        return;
+      }
+    }
+
+    // Wait configured settle delay after device is found (the "within seconds" settle time)
+    if (cfg.delayAfterDeviceConnectedMs > 0) {
+      Wh_Log(L"Waiting %d ms settle time after device connection before "
+             L"toggling...",
+             cfg.delayAfterDeviceConnectedMs);
+      if (WaitForSingleObject(g_hStopEvent, cfg.delayAfterDeviceConnectedMs) ==
+          WAIT_OBJECT_0) {
+        return;
+      }
+    }
   }
 
   g_isCycling.store(true);
@@ -541,6 +611,7 @@ static DWORD WINAPI BluetoothWorkerThread(LPVOID lpParam) {
 BOOL WhTool_ModInit() {
   Wh_Log(L"Bluetooth Auto Toggle tool mod initializing...");
 
+  g_startupStateEnforced.store(false);
   LoadSettings();
 
   g_hStopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -605,6 +676,7 @@ void WhTool_ModUninit() {
 void WhTool_ModSettingsChanged() {
   Wh_Log(L"Settings changed notification received.");
   LoadSettings();
+  g_startupStateEnforced.store(false);
 
   AcquireSRWLockShared(&g_settingsLock);
   bool force = g_settings.forceToggleOnSettingsChange;

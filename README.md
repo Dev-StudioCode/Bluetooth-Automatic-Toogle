@@ -56,6 +56,7 @@ Settings can be customized directly within the mod details view in Windhawk:
 
 | Setting | Default | Description |
 | :--- | :---: | :--- |
+| **Startup Bluetooth State** | `on` | Initial power state enforcement at startup: force Bluetooth ON (`on`, ensures Bluetooth is active at startup even if turned off before shutdown), force Bluetooth OFF (`off`, stays OFF and automatically executes the fast toggle when you manually turn it back on later), or leave unchanged (`unchanged`, retains Windows state). |
 | **Activation Mode** | `startup` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
 | **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
