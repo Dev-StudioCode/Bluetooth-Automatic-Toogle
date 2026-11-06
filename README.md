@@ -55,7 +55,7 @@ Settings can be customized directly within the mod details view in Windhawk:
 
 | Setting | Default | Description |
 | :--- | :---: | :--- |
-| **Only When Device Connected** | `true` | Restricts cycling to sessions where an active Bluetooth device is present. If disabled, cycling proceeds on startup unconditionally. |
+| **Activation Mode** | `deviceConnected` | Mode selection: only cycle after a connected Bluetooth device is detected (`deviceConnected`), or immediately upon Windows startup (`startup`, executing Turn ON -> OFF -> finally ON). |
 | **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
 | **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
