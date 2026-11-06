@@ -2,7 +2,7 @@
 // @id              bluetooth-auto-toggle
 // @name            Bluetooth Auto Toggle
 // @description     Automatically cycles Bluetooth off and back on in milliseconds when a connected device is detected at startup
-// @version         1.1.0
+// @version         1.2.0
 // @author          Dev-StudioCode
 // @github          https://github.com/Dev-StudioCode
 // @include         windhawk.exe
@@ -194,7 +194,6 @@ static void LoadSettings() {
     }
     Wh_FreeStringSetting(stateStr);
   } else {
-    // Backward compatibility if ensureBluetoothOnAtStartup was saved
     int ensureOn = Wh_GetIntSetting(L"ensureBluetoothOnAtStartup");
     if (ensureOn == 0 && Wh_GetStringSetting(L"ensureBluetoothOnAtStartup") != nullptr) {
       g_settings.startupBluetoothState = StartupBluetoothState::Unchanged;
@@ -212,7 +211,6 @@ static void LoadSettings() {
     }
     Wh_FreeStringSetting(modeStr);
   } else {
-    // Backward compatibility with legacy boolean setting if present
     g_settings.activationMode =
         (Wh_GetIntSetting(L"onlyWhenDeviceConnected") == 1)
             ? ActivationMode::DeviceConnected
@@ -288,7 +286,6 @@ static void MarkToggledInThisSession() {
 
 static bool GetFirstConnectedBluetoothDevice(std::wstring &outName) {
   try {
-    // 1. Check Classic Bluetooth connected devices
     auto aqsClassic = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(
         BluetoothConnectionStatus::Connected);
     auto devicesClassic = DeviceInformation::FindAllAsync(aqsClassic).get();
@@ -297,7 +294,6 @@ static bool GetFirstConnectedBluetoothDevice(std::wstring &outName) {
       return true;
     }
 
-    // 2. Check BLE connected devices
     auto aqsBle = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(
         BluetoothConnectionStatus::Connected);
     auto devicesBle = DeviceInformation::FindAllAsync(aqsBle).get();
@@ -333,7 +329,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
   }
 
-  // Locate Bluetooth radio(s) with retries
   std::vector<Radio> targetRadios;
   for (int attempt = 1; attempt <= cfg.maxRetries; ++attempt) {
     if (WaitForSingleObject(g_hStopEvent, 0) == WAIT_OBJECT_0) {
@@ -381,7 +376,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     return;
   }
 
-  // Apply configured startup Bluetooth power state on initial startup
   if (!isManualTest && !g_startupStateEnforced.exchange(true)) {
     if (cfg.startupBluetoothState == StartupBluetoothState::On) {
       for (const auto &radio : targetRadios) {
@@ -412,7 +406,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
   }
 
-  // Check if any target radio is currently ON
   bool anyRadioOn = false;
   for (const auto &radio : targetRadios) {
     try {
@@ -424,7 +417,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
   }
 
-  // If Bluetooth is currently OFF, wait for manual turn-on to trigger fast toggle
   if (!anyRadioOn && !isManualTest) {
     Wh_Log(L"Bluetooth is currently OFF. Listening for manual turn-on to trigger fast toggle...");
     UnsubscribeRadioStateChanged();
@@ -450,7 +442,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     return;
   }
 
-  // If configured to only toggle when a device is connected (bypassed on manual test):
   if (!isManualTest && cfg.activationMode == ActivationMode::DeviceConnected) {
     Wh_Log(L"Monitoring for connected Bluetooth device (timeout: %d s)...",
            cfg.deviceWaitTimeoutSec);
@@ -478,16 +469,13 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
         }
       }
 
-      // Wait 1 second before re-checking, or until stop event
       if (WaitForSingleObject(g_hStopEvent, 1000) == WAIT_OBJECT_0) {
         return;
       }
     }
 
-    // Wait configured settle delay after device is found (the "within seconds" settle time)
     if (cfg.delayAfterDeviceConnectedMs > 0) {
-      Wh_Log(L"Waiting %d ms settle time after device connection before "
-             L"toggling...",
+      Wh_Log(L"Waiting %d ms settle time after device connection before toggling...",
              cfg.delayAfterDeviceConnectedMs);
       if (WaitForSingleObject(g_hStopEvent, cfg.delayAfterDeviceConnectedMs) ==
           WAIT_OBJECT_0) {
@@ -498,7 +486,6 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
 
   g_isCycling.store(true);
 
-  // Step 1: Turn OFF only radios that are currently ON
   std::vector<std::pair<Radio, std::wstring>> cycledRadios;
   for (const auto &radio : targetRadios) {
     try {
@@ -531,14 +518,10 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     return;
   }
 
-  // Step 2: Wait the configured milliseconds between OFF and ON.
-  // On stop event, skip the remaining wait, but NEVER exit before powering
-  // radios back on.
   Wh_Log(L"Waiting %d ms before turning Bluetooth back ON...",
          cfg.toggleDelayMs);
   WaitForSingleObject(g_hStopEvent, cfg.toggleDelayMs);
 
-  // Step 3: Turn cycled radios back ON (with retry on failure)
   for (const auto &[radio, name] : cycledRadios) {
     Wh_Log(L"Adapter \"%s\". Commanding back ON...", name.c_str());
 
@@ -620,7 +603,6 @@ BOOL WhTool_ModInit() {
     return FALSE;
   }
 
-  // Auto-reset event, initially signaled to trigger on startup
   g_hTriggerEvent = CreateEventW(NULL, FALSE, TRUE, NULL);
   if (!g_hTriggerEvent) {
     Wh_Log(L"CreateEvent (trigger) failed: %d", GetLastError());
@@ -653,8 +635,6 @@ void WhTool_ModUninit() {
   }
 
   if (g_hWorkerThread) {
-    // Wait up to 15 seconds for the worker thread to finish the turn-on step
-    // and exit cleanly
     WaitForSingleObject(g_hWorkerThread, 15000);
     CloseHandle(g_hWorkerThread);
     g_hWorkerThread = NULL;
@@ -683,8 +663,7 @@ void WhTool_ModSettingsChanged() {
   ReleaseSRWLockShared(&g_settingsLock);
 
   if (force && g_hTriggerEvent) {
-    Wh_Log(L"forceToggleOnSettingsChange enabled, triggering immediate test "
-           L"toggle...");
+    Wh_Log(L"forceToggleOnSettingsChange enabled, triggering immediate test toggle...");
     g_forceNextRun.store(true);
     SetEvent(g_hTriggerEvent);
   }
@@ -692,17 +671,7 @@ void WhTool_ModSettingsChanged() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Windhawk tool mod implementation for mods which don't need to inject to other
-// processes or hook other functions. Context:
-// https://github.com/ramensoftware/windhawk/wiki/Mods-as-tools:-Running-mods-in-a-dedicated-process
-//
-// The mod will load and run in a dedicated windhawk.exe process.
-//
-// Paste the code below as part of the mod code, and use these callbacks:
-// * WhTool_ModInit
-// * WhTool_ModSettingsChanged
-// * WhTool_ModUninit
-//
-// Currently, other callbacks are not supported.
+// processes or hook other functions.
 
 bool g_isToolModProcessLauncher;
 HANDLE g_toolModProcessMutex;
