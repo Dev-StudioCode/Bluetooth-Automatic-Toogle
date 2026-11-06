@@ -27,7 +27,8 @@ connected, pausing a configurable few seconds for the driver stack to settle,
 and cleanly cycling the Bluetooth radio off and then back on in the background.
 
 ### Key Features
-- **Device-Aware Activation:** By default, only cycles Bluetooth when a
+- **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF at boot, it listens for when you manually turn it ON later and instantly executes the fast toggle.
+- **Device-Aware Activation:** Optionally only cycles Bluetooth when a
 connected Bluetooth device (headset, mouse, keyboard, etc.) is found.
 - **Precise Millisecond Timing:** Configurable startup delay, post-connection
 delay, and off-to-on toggle duration in milliseconds.
@@ -50,12 +51,12 @@ reload, and instant cancellation on shutdown.
 
 // ==WindhawkModSettings==
 /*
-- activationMode: deviceConnected
+- activationMode: startup
   $name: Activation Mode
-  $description: Choose when the Bluetooth cycle occurs (only after a connected Bluetooth device is detected, or as soon as Windows starts).
+  $description: Choose when the Bluetooth cycle occurs (on startup / manual turn-on, or only after a device is connected).
   $options:
+  - startup: On startup (cycle if ON, or on manual turn-on if OFF)
   - deviceConnected: Only when a device is connected
-  - startup: On Windows startup (Turn ON -> OFF -> finally ON)
 
 - delayAfterDeviceConnectedMs: 2000
   $name: Delay After Device Found (ms)
@@ -140,24 +141,46 @@ static HANDLE g_hWorkerThread = NULL;
 static HANDLE g_hStopEvent = NULL;
 static HANDLE g_hTriggerEvent = NULL;
 static std::atomic<bool> g_forceNextRun{false};
+static std::atomic<bool> g_isCycling{false};
+
+struct RadioSubscription {
+  Radio radio{nullptr};
+  winrt::event_token token{};
+};
+static std::vector<RadioSubscription> g_radioSubscriptions;
+static SRWLOCK g_subscriptionsLock = SRWLOCK_INIT;
+
+static void UnsubscribeRadioStateChanged() {
+  AcquireSRWLockExclusive(&g_subscriptionsLock);
+  for (auto &sub : g_radioSubscriptions) {
+    try {
+      if (sub.radio) {
+        sub.radio.StateChanged(sub.token);
+      }
+    } catch (...) {
+    }
+  }
+  g_radioSubscriptions.clear();
+  ReleaseSRWLockExclusive(&g_subscriptionsLock);
+}
 
 static void LoadSettings() {
   AcquireSRWLockExclusive(&g_settingsLock);
 
   PCWSTR modeStr = Wh_GetStringSetting(L"activationMode");
   if (modeStr && *modeStr) {
-    if (wcscmp(modeStr, L"startup") == 0) {
-      g_settings.activationMode = ActivationMode::Startup;
-    } else {
+    if (wcscmp(modeStr, L"deviceConnected") == 0) {
       g_settings.activationMode = ActivationMode::DeviceConnected;
+    } else {
+      g_settings.activationMode = ActivationMode::Startup;
     }
     Wh_FreeStringSetting(modeStr);
   } else {
     // Backward compatibility with legacy boolean setting if present
     g_settings.activationMode =
-        (Wh_GetIntSetting(L"onlyWhenDeviceConnected") == 0)
-            ? ActivationMode::Startup
-            : ActivationMode::DeviceConnected;
+        (Wh_GetIntSetting(L"onlyWhenDeviceConnected") == 1)
+            ? ActivationMode::DeviceConnected
+            : ActivationMode::Startup;
   }
 
   g_settings.delayAfterDeviceConnectedMs =
@@ -365,28 +388,45 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     return;
   }
 
-  // In Startup mode, if any radio is currently not ON, power it ON first
-  // so it can execute the full cycle: Turn ON -> Turn OFF -> Finally ON
-  if (cfg.activationMode == ActivationMode::Startup) {
-    for (const auto &radio : targetRadios) {
-      try {
-        std::wstring name = radio.Name().c_str();
-        RadioState state = radio.State();
-        if (state != RadioState::On) {
-          Wh_Log(L"Startup mode: Adapter \"%s\" is not ON (state: %d). Commanding ON first...",
-                 name.c_str(), (int)state);
-          RadioAccessStatus res = radio.SetStateAsync(RadioState::On).get();
-          if (res == RadioAccessStatus::Allowed) {
-            Wh_Log(L"Adapter \"%s\" powered ON.", name.c_str());
-            WaitForSingleObject(g_hStopEvent, 200);
-          }
-        }
-      } catch (const winrt::hresult_error &ex) {
-        Wh_Log(L"Exception turning ON radio at startup: 0x%08X (%s)",
-               (unsigned int)ex.code(), ex.message().c_str());
+  // Check if any target radio is currently ON
+  bool anyRadioOn = false;
+  for (const auto &radio : targetRadios) {
+    try {
+      if (radio.State() == RadioState::On) {
+        anyRadioOn = true;
+        break;
       }
+    } catch (...) {
     }
   }
+
+  // If in Startup mode and Bluetooth is currently OFF, wait for manual turn-on
+  if (!anyRadioOn && !isManualTest && cfg.activationMode == ActivationMode::Startup) {
+    Wh_Log(L"Bluetooth is currently OFF at startup. Listening for manual turn-on to trigger fast toggle...");
+    UnsubscribeRadioStateChanged();
+    AcquireSRWLockExclusive(&g_subscriptionsLock);
+    for (const auto &radio : targetRadios) {
+      try {
+        winrt::event_token token = radio.StateChanged([](Radio const &sender, auto const &) {
+          try {
+            if (sender.State() == RadioState::On) {
+              if (!g_isCycling.load() && !HasToggledInThisSession()) {
+                Wh_Log(L"Bluetooth radio was manually turned ON later! Triggering fast toggle...");
+                SetEvent(g_hTriggerEvent);
+              }
+            }
+          } catch (...) {
+          }
+        });
+        g_radioSubscriptions.push_back({radio, token});
+      } catch (...) {
+      }
+    }
+    ReleaseSRWLockExclusive(&g_subscriptionsLock);
+    return;
+  }
+
+  g_isCycling.store(true);
 
   // Step 1: Turn OFF only radios that are currently ON
   std::vector<std::pair<Radio, std::wstring>> cycledRadios;
@@ -416,6 +456,7 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
   }
 
   if (cycledRadios.empty()) {
+    g_isCycling.store(false);
     Wh_Log(L"No active Bluetooth radios to cycle.");
     return;
   }
@@ -452,8 +493,11 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
   }
 
+  g_isCycling.store(false);
+
   if (!isManualTest) {
     MarkToggledInThisSession();
+    UnsubscribeRadioStateChanged();
   }
   Wh_Log(L"Bluetooth automatic toggle cycle completed successfully.");
 }
@@ -530,6 +574,8 @@ BOOL WhTool_ModInit() {
 
 void WhTool_ModUninit() {
   Wh_Log(L"Bluetooth Auto Toggle tool mod uninitializing...");
+
+  UnsubscribeRadioStateChanged();
 
   if (g_hStopEvent) {
     SetEvent(g_hStopEvent);

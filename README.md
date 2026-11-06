@@ -24,6 +24,7 @@ On Windows 10 and 11 systems—especially those utilizing Fast Startup—Bluetoo
 
 ## Key Features
 
+* **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF during boot, the mod listens for when you manually turn it ON later and instantly executes the fast toggle.
 * **Device-Aware Activation:** Evaluates device connectivity before initiating cycling, ensuring that idle systems without connected peripherals are not cycled unnecessarily.
 * **Configurable Post-Connection Settle Delay:** Introduces a configurable delay (default: 2,000 ms) after device detection to ensure the driver stack and profile layers have settled before executing the toggle.
 * **Millisecond Precision Control:** Provides granular configuration over startup settle timing, discovery retry intervals, and radio off-to-on duration in milliseconds.
@@ -55,7 +56,7 @@ Settings can be customized directly within the mod details view in Windhawk:
 
 | Setting | Default | Description |
 | :--- | :---: | :--- |
-| **Activation Mode** | `deviceConnected` | Mode selection: only cycle after a connected Bluetooth device is detected (`deviceConnected`), or immediately upon Windows startup (`startup`, executing Turn ON -> OFF -> finally ON). |
+| **Activation Mode** | `startup` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
 | **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
 | **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
