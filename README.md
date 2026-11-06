@@ -14,7 +14,7 @@ A [Windhawk](https://windhawk.net/) tool mod for Windows 10 and 11 that automati
 
 On Windows 10 and 11 systems especially those utilizing Fast Startup Bluetooth adapters and paired wireless peripherals can encounter driver initialization and power-state synchronization issues following a system boot:
 
-* **Peripheral Wakeup and Audio Pipeline Failures:** Wireless audio endpoints (such as headphones and earbuds) and HID peripherals (mice and keyboards) often display a "Connected" status in Windows while remaining completely unresponsive, failing to route audio, or suffering severe input latency until the Bluetooth radio is power-cycled.
+* **Peripheral Wakeup and Audio Pipeline Failures:** Wireless audio endpoints (such as headphones and earbuds) and HID peripherals (mice and keyboards) often display a "Connected" status in Windows while remaining completely unresponsive, failing to route audio, No absolute volume or suffering severe input latency until the Bluetooth radio is power-cycled.
 * **Driver Stack Unresponsiveness:** Certain Bluetooth controller drivers fail to reinitialize audio sinks or profile channels cleanly upon cold boots without a manual radio restart via the Windows Action Center or Settings.
 * **Redundant Cycling on Idle Systems:** Blindly power-cycling Bluetooth on every startup when no device is paired or actively connected introduces unnecessary radio transitions.
 
@@ -98,6 +98,22 @@ The mod is engineered to meet strict system-stability and driver-safety requirem
 * **Compiler Flags / Dependencies:** `-lole32 -loleaut32 -lruntimeobject -lshell32 -lwtsapi32`
 * **Windows Runtime APIs:** `Windows.Devices.Radios`, `Windows.Devices.Bluetooth`, `Windows.Devices.Enumeration`
 * **Resource Profile:** Zero idle CPU consumption; sleeps on OS event handles (`g_hStopEvent`, `g_hTriggerEvent`) when not cycling.
+
+---
+
+## Changelog
+
+### v1.2.0
+* **Startup Power State Enforcement:** Added `startupBluetoothState` setting to ensure Bluetooth is powered ON or OFF at Windows boot, or leave Windows state unchanged.
+* **Manual Turn-On Listener:** When Bluetooth starts in an OFF state, the mod automatically listens for manual activation to trigger the fast cycle.
+* **Sequence Optimization:** Radio discovery and power state enforcement now run before device connection checks.
+
+### v1.1.0
+* **Activation Modes:** Added `activationMode` option allowing users to toggle immediately at startup or only when a connected device is detected.
+* **Session Persistence:** Added Windows Terminal Services (WTS) logon session tracking via binary values to persist execution state across process restarts.
+
+### v1.0.0
+* Initial release with device-aware Bluetooth off-on cycling, millisecond timing configuration, and cold-boot hardware retry handling.
 
 ---
 

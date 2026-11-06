@@ -20,14 +20,17 @@ Bluetooth device is detected.
 ### Why this mod?
 Some Bluetooth hardware adapters, drivers, and wireless peripherals (e.g.,
 Bluetooth headphones, earbuds, mice, and keyboards) enter an unresponsive or
-degraded state on fresh system boots—even when Windows displays them as
-"connected"—causing audio silence, latency, or connection drops unless Bluetooth
-is power-cycled. This mod automates that process by waiting until a device is
-connected, pausing a configurable few seconds for the driver stack to settle,
-and cleanly cycling the Bluetooth radio off and then back on in the background.
+degraded state on fresh system boots even when Windows displays them as
+"connected" causing audio silence, latency, No absolute volume or connection
+drops unless Bluetooth is power-cycled. This mod automates that process by
+waiting until a device is connected, pausing a configurable few seconds for the
+driver stack to settle, and cleanly cycling the Bluetooth radio off and then
+back on in the background.
 
 ### Key Features
-- **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF at boot, it listens for when you manually turn it ON later and instantly executes the fast toggle.
+- **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and
+back on at startup if active. If Bluetooth was OFF at boot, it listens for when
+you manually turn it ON later and instantly executes the fast toggle.
 - **Device-Aware Activation:** Optionally only cycles Bluetooth when a
 connected Bluetooth device (headset, mouse, keyboard, etc.) is found.
 - **Precise Millisecond Timing:** Configurable startup delay, post-connection
@@ -46,6 +49,18 @@ commanded back on with retries even if the mod is unloaded mid-cycle.
 process restarts using Windows Terminal Services (WTS) logon timestamps.
 - **Graceful Lifecycle & Live Testing:** Responsive to settings updates, mod
 reload, and instant cancellation on shutdown.
+
+### Changelog
+
+- **v1.2.0**
+  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON / OFF / Unchanged) at startup.
+  - Added manual turn-on event detection if Bluetooth starts in an OFF state.
+  - Reordered initialization flow so radio state is verified before device connection checks.
+- **v1.1.0**
+  - Added `activationMode` option (`startup` vs `deviceConnected`).
+  - Added WTS session logon tracking to persist single-cycle state across restarts.
+- **v1.0.0**
+  - Initial release.
 */
 // ==/WindhawkModReadme==
 
@@ -125,16 +140,9 @@ using namespace winrt::Windows::Devices::Enumeration;
 using namespace winrt::Windows::Devices::Bluetooth;
 using namespace winrt::Windows::Devices::Radios;
 
-enum class StartupBluetoothState {
-  On,
-  Off,
-  Unchanged
-};
+enum class StartupBluetoothState { On, Off, Unchanged };
 
-enum class ActivationMode {
-  Startup,
-  DeviceConnected
-};
+enum class ActivationMode { Startup, DeviceConnected };
 
 struct Settings {
   StartupBluetoothState startupBluetoothState;
@@ -195,7 +203,8 @@ static void LoadSettings() {
     Wh_FreeStringSetting(stateStr);
   } else {
     int ensureOn = Wh_GetIntSetting(L"ensureBluetoothOnAtStartup");
-    if (ensureOn == 0 && Wh_GetStringSetting(L"ensureBluetoothOnAtStartup") != nullptr) {
+    if (ensureOn == 0 &&
+        Wh_GetStringSetting(L"ensureBluetoothOnAtStartup") != nullptr) {
       g_settings.startupBluetoothState = StartupBluetoothState::Unchanged;
     } else {
       g_settings.startupBluetoothState = StartupBluetoothState::On;
@@ -242,11 +251,13 @@ static void LoadSettings() {
          L"waitTimeout=%ds, startupDelay=%dms, toggleDelay=%dms, onlyOnce=%d",
          g_settings.startupBluetoothState == StartupBluetoothState::Off
              ? L"off"
-             : (g_settings.startupBluetoothState == StartupBluetoothState::Unchanged
+             : (g_settings.startupBluetoothState ==
+                        StartupBluetoothState::Unchanged
                     ? L"unchanged"
                     : L"on"),
-         g_settings.activationMode == ActivationMode::Startup ? L"startup"
-                                                              : L"deviceConnected",
+         g_settings.activationMode == ActivationMode::Startup
+             ? L"startup"
+             : L"deviceConnected",
          g_settings.delayAfterDeviceConnectedMs,
          g_settings.deviceWaitTimeoutSec, g_settings.startupDelayMs,
          g_settings.toggleDelayMs, (int)g_settings.onlyOncePerSession);
@@ -382,7 +393,8 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
         try {
           if (radio.State() != RadioState::On) {
             std::wstring name = radio.Name().c_str();
-            Wh_Log(L"Adapter \"%s\" is not ON at startup. Powering ON as configured...",
+            Wh_Log(L"Adapter \"%s\" is not ON at startup. Powering ON as "
+                   L"configured...",
                    name.c_str());
             radio.SetStateAsync(RadioState::On).get();
             Sleep(200);
@@ -395,7 +407,8 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
         try {
           if (radio.State() == RadioState::On) {
             std::wstring name = radio.Name().c_str();
-            Wh_Log(L"Adapter \"%s\" is ON at startup. Powering OFF as configured...",
+            Wh_Log(L"Adapter \"%s\" is ON at startup. Powering OFF as "
+                   L"configured...",
                    name.c_str());
             radio.SetStateAsync(RadioState::Off).get();
             Sleep(100);
@@ -418,22 +431,25 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
   }
 
   if (!anyRadioOn && !isManualTest) {
-    Wh_Log(L"Bluetooth is currently OFF. Listening for manual turn-on to trigger fast toggle...");
+    Wh_Log(L"Bluetooth is currently OFF. Listening for manual turn-on to "
+           L"trigger fast toggle...");
     UnsubscribeRadioStateChanged();
     AcquireSRWLockExclusive(&g_subscriptionsLock);
     for (const auto &radio : targetRadios) {
       try {
-        winrt::event_token token = radio.StateChanged([](Radio const &sender, auto const &) {
-          try {
-            if (sender.State() == RadioState::On) {
-              if (!g_isCycling.load() && !HasToggledInThisSession()) {
-                Wh_Log(L"Bluetooth radio was manually turned ON later! Triggering fast toggle...");
-                SetEvent(g_hTriggerEvent);
+        winrt::event_token token =
+            radio.StateChanged([](Radio const &sender, auto const &) {
+              try {
+                if (sender.State() == RadioState::On) {
+                  if (!g_isCycling.load() && !HasToggledInThisSession()) {
+                    Wh_Log(L"Bluetooth radio was manually turned ON later! "
+                           L"Triggering fast toggle...");
+                    SetEvent(g_hTriggerEvent);
+                  }
+                }
+              } catch (...) {
               }
-            }
-          } catch (...) {
-          }
-        });
+            });
         g_radioSubscriptions.push_back({radio, token});
       } catch (...) {
       }
@@ -475,7 +491,8 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     }
 
     if (cfg.delayAfterDeviceConnectedMs > 0) {
-      Wh_Log(L"Waiting %d ms settle time after device connection before toggling...",
+      Wh_Log(L"Waiting %d ms settle time after device connection before "
+             L"toggling...",
              cfg.delayAfterDeviceConnectedMs);
       if (WaitForSingleObject(g_hStopEvent, cfg.delayAfterDeviceConnectedMs) ==
           WAIT_OBJECT_0) {
@@ -663,7 +680,8 @@ void WhTool_ModSettingsChanged() {
   ReleaseSRWLockShared(&g_settingsLock);
 
   if (force && g_hTriggerEvent) {
-    Wh_Log(L"forceToggleOnSettingsChange enabled, triggering immediate test toggle...");
+    Wh_Log(L"forceToggleOnSettingsChange enabled, triggering immediate test "
+           L"toggle...");
     g_forceNextRun.store(true);
     SetEvent(g_hTriggerEvent);
   }
