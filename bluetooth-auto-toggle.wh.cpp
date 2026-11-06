@@ -49,6 +49,7 @@ reload, and instant cancellation on shutdown.
 */
 // ==/WindhawkModReadme==
 
+// clang-format off
 // ==WindhawkModSettings==
 /*
 - startupBluetoothState: on
@@ -100,7 +101,6 @@ reload, and instant cancellation on shutdown.
 */
 // ==/WindhawkModSettings==
 
-// clang-format off
 #include <windows.h>
 #include <shellapi.h>
 #include <wtsapi32.h>
