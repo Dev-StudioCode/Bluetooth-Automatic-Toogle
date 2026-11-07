@@ -14,7 +14,7 @@ A [Windhawk](https://windhawk.net/) tool mod for Windows 10 and 11 that automati
 
 On Windows 10 and 11 systems especially those utilizing Fast Startup Bluetooth adapters and paired wireless peripherals can encounter driver initialization and power-state synchronization issues following a system boot:
 
-* **Peripheral Wakeup and Audio Pipeline Failures:** Wireless audio endpoints (such as headphones and earbuds) and HID peripherals (mice and keyboards) often display a "Connected" status in Windows while remaining completely unresponsive, failing to route audio, No absolute volume or suffering severe input latency until the Bluetooth radio is power-cycled.
+* **Peripheral Wakeup and Audio Pipeline Failures:** Wireless audio endpoints (such as headphones and earbuds) and HID peripherals (mice and keyboards) often display a "Connected" status in Windows while remaining completely unresponsive, failing to route audio, no absolute volume or suffering severe input latency until the Bluetooth radio is power-cycled.
 * **Driver Stack Unresponsiveness:** Certain Bluetooth controller drivers fail to reinitialize audio sinks or profile channels cleanly upon cold boots without a manual radio restart via the Windows Action Center or Settings.
 * **Redundant Cycling on Idle Systems:** Blindly power-cycling Bluetooth on every startup when no device is paired or actively connected introduces unnecessary radio transitions.
 
@@ -56,8 +56,8 @@ Settings can be customized directly within the mod details view in Windhawk:
 
 | Setting | Default | Description |
 | :--- | :---: | :--- |
-| **Startup Bluetooth State** | `on` | Initial power state enforcement at startup: force Bluetooth ON (`on`, ensures Bluetooth is active at startup even if turned off before shutdown), force Bluetooth OFF (`off`, stays OFF and automatically executes the fast toggle when you manually turn it back on later), or leave unchanged (`unchanged`, retains Windows state). |
-| **Activation Mode** | `startup` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
+| **Startup Bluetooth State** | `unchanged` | Initial power state enforcement at startup: force Bluetooth ON (`on`, ensures Bluetooth is active at startup even if turned off before shutdown), force Bluetooth OFF (`off`, stays OFF and automatically executes the fast toggle when you manually turn it back on later), or leave unchanged (`unchanged`, retains Windows state). |
+| **Activation Mode** | `deviceConnected` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
 | **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
 | **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
