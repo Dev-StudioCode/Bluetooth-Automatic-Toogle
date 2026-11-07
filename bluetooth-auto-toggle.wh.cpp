@@ -1,7 +1,8 @@
 // ==WindhawkMod==
 // @id              bluetooth-auto-toggle
 // @name            Bluetooth Auto Toggle
-// @description     Automatically cycles Bluetooth off and back on in milliseconds when a connected device is detected at startup
+// @description     Automatically cycles Bluetooth off and back on in
+// milliseconds when a connected device is detected at startup
 // @version         1.2.0
 // @author          Dev-StudioCode
 // @github          https://github.com/Dev-StudioCode
@@ -53,13 +54,18 @@ reload, and instant cancellation on shutdown.
 ### Changelog
 
 - **v1.2.0**
-  - Replaced `onlyWhenDeviceConnected` with `activationMode` (`deviceConnected` vs `startup`).
-  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON / OFF / Unchanged) at startup.
+  - Replaced `onlyWhenDeviceConnected` with `activationMode` (`deviceConnected`
+vs `startup`).
+  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON /
+OFF / Unchanged) at startup.
   - Added manual turn-on event detection if Bluetooth starts in an OFF state.
-  - Reordered initialization flow so radio discovery and power state enforcement run before device connection checks.
+  - Reordered initialization flow so radio discovery and power state enforcement
+run before device connection checks.
 - **v1.1.0**
-  - Added `onlyWhenDeviceConnected` setting to only cycle when a connected device is detected.
-  - Added WTS session logon tracking to persist single-cycle state across restarts.
+  - Added `onlyWhenDeviceConnected` setting to only cycle when a connected
+device is detected.
+  - Added WTS session logon tracking to persist single-cycle state across
+restarts.
 - **v1.0.0**
   - Initial release.
 */
