@@ -24,7 +24,7 @@ On Windows 10 and 11 systems especially those utilizing Fast Startup Bluetooth a
 
 ## Key Features
 
-* **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF during boot, the mod listens for when you manually turn it ON later and instantly executes the fast toggle.
+* **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF during boot, the mod listens for when you manually turn it ON later and automatically triggers the fast toggle cycle.
 * **Device-Aware Activation:** Evaluates device connectivity before initiating cycling, ensuring that idle systems without connected peripherals are not cycled unnecessarily.
 * **Configurable Post-Connection Settle Delay:** Introduces a configurable delay (default: 2,000 ms) after device detection to ensure the driver stack and profile layers have settled before executing the toggle.
 * **Millisecond Precision Control:** Provides granular configuration over startup settle timing, discovery retry intervals, and radio off-to-on duration in milliseconds.
@@ -104,12 +104,13 @@ The mod is engineered to meet strict system-stability and driver-safety requirem
 ## Changelog
 
 ### v1.2.0
+* **Activation Modes:** Replaced `onlyWhenDeviceConnected` with `activationMode` option allowing users to toggle immediately at startup or only when a connected device is detected.
 * **Startup Power State Enforcement:** Added `startupBluetoothState` setting to ensure Bluetooth is powered ON or OFF at Windows boot, or leave Windows state unchanged.
 * **Manual Turn-On Listener:** When Bluetooth starts in an OFF state, the mod automatically listens for manual activation to trigger the fast cycle.
 * **Sequence Optimization:** Radio discovery and power state enforcement now run before device connection checks.
 
 ### v1.1.0
-* **Activation Modes:** Added `activationMode` option allowing users to toggle immediately at startup or only when a connected device is detected.
+* **Device-Aware Activation:** Added `onlyWhenDeviceConnected` setting allowing users to only cycle after a connected Bluetooth device is detected.
 * **Session Persistence:** Added Windows Terminal Services (WTS) logon session tracking via binary values to persist execution state across process restarts.
 
 ### v1.0.0
