@@ -59,14 +59,14 @@ Settings can be customized directly within the mod details view in Windhawk:
 | :--- | :---: | :--- |
 | **Startup Bluetooth State** | `unchanged` | Initial power state enforcement at startup: force Bluetooth ON (`on`, ensures Bluetooth is active at startup even if turned off before shutdown), force Bluetooth OFF (`off`, stays OFF and automatically executes the fast toggle when you manually turn it back on later), or leave unchanged (`unchanged`, retains Windows state). |
 | **Activation Mode** | `deviceConnected` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
-| **Toggle on Every Device Connection** | `false` | Continuously monitors and power-cycles Bluetooth whenever any Bluetooth device connects, rather than only once after startup. |
-| **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
+| **Toggle on Every Device Connection** | `false` | Continuously monitors and cycles Bluetooth whenever any Bluetooth device connects throughout the session (briefly power-cycling the radio and disconnecting active devices). Overrides single-cycle limit for new device connections. |
+| **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle (applied in device-connected mode and to connection-triggered runs). |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
 | **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
 | **Toggle Off-to-On Duration (ms)** | `500` | Duration in milliseconds the radio remains powered off before issuing the power-on command. |
 | **Radio Detection Retries** | `10` | Maximum retry count for radio discovery if the Bluetooth adapter is not immediately reported by the system. |
 | **Radio Retry Interval (ms)** | `500` | Interval in milliseconds between discovery attempts. |
-| **Toggle Only Once Per Logon Session** | `true` | Prevents redundant execution if Windhawk restarts or settings are reloaded within the same Windows session. |
+| **Toggle Only Once Per Logon Session** | `true` | Prevents redundant execution on startup if Windhawk is restarted or settings are reloaded within the same Windows session. |
 | **Re-toggle on Settings Save** | `false` | Bypasses session markers, startup delays, and device checks to perform an immediate diagnostic cycle when settings are saved. |
 
 ---
@@ -99,7 +99,7 @@ The mod is engineered to meet strict system-stability and driver-safety requirem
 * **Toolchain:** Clang / LLVM (MinGW-w64 target) via the Windhawk Compiler suite
 * **Compiler Flags / Dependencies:** `-lole32 -loleaut32 -lruntimeobject -lshell32 -lwtsapi32`
 * **Windows Runtime APIs:** `Windows.Devices.Radios`, `Windows.Devices.Bluetooth`, `Windows.Devices.Enumeration`
-* **Resource Profile:** Zero idle CPU consumption; sleeps on OS event handles (`g_hStopEvent`, `g_hTriggerEvent`, `g_hWakeEvent`) when not cycling, and operates with a light 1.5s background check interval when continuous monitoring is active.
+* **Resource Profile:** Zero idle CPU consumption; sleeps on OS event handles (`g_hStopEvent`, `g_hTriggerEvent`, `g_hWakeEvent`) and event-driven Windows Runtime device watcher callbacks.
 
 ---
 
@@ -107,8 +107,8 @@ The mod is engineered to meet strict system-stability and driver-safety requirem
 
 ### v1.3.0
 * **Continuous Device Monitoring:** Added `toggleOnEveryDeviceConnection` setting to continuously monitor and power-cycle Bluetooth on every newly connected Bluetooth device throughout the session.
-* **Reconnection Loop Prevention:** Implemented smart post-cycle cooldown and connected device tracking to eliminate infinite toggle loops upon device reconnection.
-* **Device Discovery Optimization:** Consolidated Bluetooth classic and BLE queries into unified helper routines.
+* **Event-Driven Device Watcher:** Replaced polling with Windows Runtime `DeviceWatcher` (`System.Devices.Aep.IsConnected`) for zero idle CPU overhead.
+* **Reconnection Loop Prevention:** Tracks devices dropped during radio cycling (`g_droppedByCycle`) so subsequent reconnection of active devices does not trigger redundant cycles.
 
 ### v1.2.0
 * **Activation Modes:** Replaced `onlyWhenDeviceConnected` with `activationMode` option allowing users to toggle immediately at startup or only when a connected device is detected.
