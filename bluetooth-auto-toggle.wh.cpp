@@ -481,12 +481,15 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     for (const auto &radio : targetRadios) {
       try {
         winrt::event_token token =
-            radio.StateChanged([onlyOnce = cfg.onlyOncePerSession](
+            radio.StateChanged([onlyOnce = cfg.onlyOncePerSession,
+                                everyConn =
+                                    cfg.toggleOnEveryDeviceConnection](
                                    Radio const &sender, auto const &) {
               try {
                 if (sender.State() == RadioState::On) {
                   if (!g_isCycling.load() &&
-                      (!onlyOnce || !HasSessionMarker(L"toggledLogon"))) {
+                      (everyConn || !onlyOnce ||
+                       !HasSessionMarker(L"toggledLogon"))) {
                     Wh_Log(L"Bluetooth radio was manually turned ON later! "
                            L"Triggering fast toggle...");
                     SetEvent(g_hTriggerEvent);
@@ -504,35 +507,40 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
   }
 
   if (!isManualTest && cfg.activationMode == ActivationMode::DeviceConnected) {
-    Wh_Log(L"Monitoring for connected Bluetooth device (timeout: %d s)...",
-           cfg.deviceWaitTimeoutSec);
     std::wstring connectedDeviceName;
-    DWORD startTick = GetTickCount();
+    if (!GetFirstConnectedBluetoothDevice(connectedDeviceName)) {
+      Wh_Log(L"Monitoring for connected Bluetooth device (timeout: %d s)...",
+             cfg.deviceWaitTimeoutSec);
+      DWORD startTick = GetTickCount();
 
-    while (true) {
-      if (WaitForSingleObject(g_hStopEvent, 0) == WAIT_OBJECT_0) {
-        return;
-      }
+      while (true) {
+        if (WaitForSingleObject(g_hStopEvent, 0) == WAIT_OBJECT_0) {
+          return;
+        }
 
-      if (GetFirstConnectedBluetoothDevice(connectedDeviceName)) {
-        Wh_Log(L"Connected Bluetooth device detected: \"%s\"",
-               connectedDeviceName.c_str());
-        break;
-      }
+        if (GetFirstConnectedBluetoothDevice(connectedDeviceName)) {
+          Wh_Log(L"Connected Bluetooth device detected: \"%s\"",
+                 connectedDeviceName.c_str());
+          break;
+        }
 
-      if (cfg.deviceWaitTimeoutSec > 0) {
-        DWORD elapsedSec = (GetTickCount() - startTick) / 1000;
-        if (elapsedSec >= (DWORD)cfg.deviceWaitTimeoutSec) {
-          Wh_Log(L"No Bluetooth device connected within timeout window (%d s). "
-                 L"Skipping toggle.",
-                 cfg.deviceWaitTimeoutSec);
+        if (cfg.deviceWaitTimeoutSec > 0) {
+          DWORD elapsedSec = (GetTickCount() - startTick) / 1000;
+          if (elapsedSec >= (DWORD)cfg.deviceWaitTimeoutSec) {
+            Wh_Log(L"No Bluetooth device connected within timeout window (%d s). "
+                   L"Skipping toggle.",
+                   cfg.deviceWaitTimeoutSec);
+            return;
+          }
+        }
+
+        if (WaitForSingleObject(g_hStopEvent, 1000) == WAIT_OBJECT_0) {
           return;
         }
       }
-
-      if (WaitForSingleObject(g_hStopEvent, 1000) == WAIT_OBJECT_0) {
-        return;
-      }
+    } else {
+      Wh_Log(L"Connected Bluetooth device detected: \"%s\"",
+             connectedDeviceName.c_str());
     }
 
     if (cfg.delayAfterDeviceConnectedMs > 0) {
@@ -613,6 +621,7 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
     UnsubscribeRadioStateChanged();
   }
 
+  g_lastCycleCompletedTick.store(GetTickCount());
   g_isCycling.store(false);
   Wh_Log(L"Bluetooth automatic toggle cycle completed successfully.");
 }
@@ -628,10 +637,17 @@ static DWORD WINAPI BluetoothWorkerThread(LPVOID lpParam) {
     return 1;
   }
 
-  HANDLE waitHandles[] = {g_hStopEvent, g_hTriggerEvent};
+  HANDLE waitHandles[] = {g_hStopEvent, g_hTriggerEvent, g_hWakeEvent};
 
   while (true) {
-    DWORD waitRes = WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
+    Settings cfg;
+    AcquireSRWLockShared(&g_settingsLock);
+    cfg = g_settings;
+    ReleaseSRWLockShared(&g_settingsLock);
+
+    DWORD waitTimeout = cfg.toggleOnEveryDeviceConnection ? 1500 : INFINITE;
+    DWORD waitRes = WaitForMultipleObjects(3, waitHandles, FALSE, waitTimeout);
+
     if (waitRes == WAIT_OBJECT_0) {
       Wh_Log(L"Worker thread stop event signaled.");
       break;
@@ -639,6 +655,64 @@ static DWORD WINAPI BluetoothWorkerThread(LPVOID lpParam) {
       Wh_Log(L"Toggle trigger event signaled.");
       bool isManual = g_forceNextRun.exchange(false);
       PerformBluetoothToggle(isManual);
+
+      std::vector<std::pair<std::wstring, std::wstring>> currentDevices;
+      GetConnectedBluetoothDevices(currentDevices);
+      AcquireSRWLockExclusive(&g_connectedDevicesLock);
+      g_knownConnectedDeviceIds.clear();
+      for (const auto &dev : currentDevices) {
+        g_knownConnectedDeviceIds.insert(dev.first);
+      }
+      ReleaseSRWLockExclusive(&g_connectedDevicesLock);
+    } else if (waitRes == WAIT_OBJECT_0 + 2) {
+      continue;
+    } else if (waitRes == WAIT_TIMEOUT) {
+      if (!cfg.toggleOnEveryDeviceConnection || g_isCycling.load()) {
+        continue;
+      }
+
+      DWORD now = GetTickCount();
+      DWORD elapsedSinceCycle = now - g_lastCycleCompletedTick.load();
+      const DWORD kCooldownMs = 15000;
+
+      std::vector<std::pair<std::wstring, std::wstring>> currentDevices;
+      GetConnectedBluetoothDevices(currentDevices);
+
+      AcquireSRWLockExclusive(&g_connectedDevicesLock);
+
+      if (elapsedSinceCycle < kCooldownMs) {
+        g_knownConnectedDeviceIds.clear();
+        for (const auto &dev : currentDevices) {
+          g_knownConnectedDeviceIds.insert(dev.first);
+        }
+        ReleaseSRWLockExclusive(&g_connectedDevicesLock);
+        continue;
+      }
+
+      std::wstring newlyConnectedName;
+      bool hasNewDevice = false;
+      for (const auto &dev : currentDevices) {
+        if (g_knownConnectedDeviceIds.find(dev.first) ==
+            g_knownConnectedDeviceIds.end()) {
+          newlyConnectedName = dev.second;
+          hasNewDevice = true;
+          break;
+        }
+      }
+
+      g_knownConnectedDeviceIds.clear();
+      for (const auto &dev : currentDevices) {
+        g_knownConnectedDeviceIds.insert(dev.first);
+      }
+
+      ReleaseSRWLockExclusive(&g_connectedDevicesLock);
+
+      if (hasNewDevice) {
+        Wh_Log(L"New Bluetooth device connection detected: \"%s\". Triggering "
+               L"cycle...",
+               newlyConnectedName.c_str());
+        PerformBluetoothToggle(false);
+      }
     } else {
       break;
     }
@@ -674,9 +748,21 @@ BOOL WhTool_ModInit() {
     return FALSE;
   }
 
+  g_hWakeEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+  if (!g_hWakeEvent) {
+    Wh_Log(L"CreateEvent (wake) failed: %d", GetLastError());
+    CloseHandle(g_hTriggerEvent);
+    g_hTriggerEvent = NULL;
+    CloseHandle(g_hStopEvent);
+    g_hStopEvent = NULL;
+    return FALSE;
+  }
+
   g_hWorkerThread = CreateThread(NULL, 0, BluetoothWorkerThread, NULL, 0, NULL);
   if (!g_hWorkerThread) {
     Wh_Log(L"CreateThread failed: %d", GetLastError());
+    CloseHandle(g_hWakeEvent);
+    g_hWakeEvent = NULL;
     CloseHandle(g_hTriggerEvent);
     g_hTriggerEvent = NULL;
     CloseHandle(g_hStopEvent);
@@ -711,6 +797,11 @@ void WhTool_ModUninit() {
     g_hTriggerEvent = NULL;
   }
 
+  if (g_hWakeEvent) {
+    CloseHandle(g_hWakeEvent);
+    g_hWakeEvent = NULL;
+  }
+
   Wh_Log(L"Bluetooth Auto Toggle tool mod uninitialized.");
 }
 
@@ -727,6 +818,8 @@ void WhTool_ModSettingsChanged() {
            L"toggle...");
     g_forceNextRun.store(true);
     SetEvent(g_hTriggerEvent);
+  } else if (g_hWakeEvent) {
+    SetEvent(g_hWakeEvent);
   }
 }
 

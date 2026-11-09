@@ -2,7 +2,7 @@
 
 [![Windhawk Mod](https://img.shields.io/badge/Windhawk-Mod-0078D6.svg)](https://windhawk.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.2.0-green.svg)](#specifications)
+[![Version](https://img.shields.io/badge/Version-1.3.0-green.svg)](#specifications)
 [![Architecture](https://img.shields.io/badge/Architecture-x64-success.svg)](#specifications)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -26,6 +26,7 @@ On Windows 10 and 11 systems especially those utilizing Fast Startup Bluetooth a
 
 * **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF during boot, the mod listens for when you manually turn it ON later and automatically triggers the fast toggle cycle.
 * **Device-Aware Activation:** Evaluates device connectivity before initiating cycling, ensuring that idle systems without connected peripherals are not cycled unnecessarily.
+* **Continuous Device Monitoring:** Optionally monitors for connected devices and cycles Bluetooth whenever any Bluetooth device connects throughout the day.
 * **Configurable Post-Connection Settle Delay:** Introduces a configurable delay (default: 2,000 ms) after device detection to ensure the driver stack and profile layers have settled before executing the toggle.
 * **Millisecond Precision Control:** Provides granular configuration over startup settle timing, discovery retry intervals, and radio off-to-on duration in milliseconds.
 * **Isolated Tool Mod Architecture:** Executes inside an isolated, dedicated `windhawk.exe` background process using official Windhawk tool mod conventions, preventing any injection into `explorer.exe` or the Windows desktop shell.
@@ -58,6 +59,7 @@ Settings can be customized directly within the mod details view in Windhawk:
 | :--- | :---: | :--- |
 | **Startup Bluetooth State** | `unchanged` | Initial power state enforcement at startup: force Bluetooth ON (`on`, ensures Bluetooth is active at startup even if turned off before shutdown), force Bluetooth OFF (`off`, stays OFF and automatically executes the fast toggle when you manually turn it back on later), or leave unchanged (`unchanged`, retains Windows state). |
 | **Activation Mode** | `deviceConnected` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
+| **Toggle on Every Device Connection** | `false` | Continuously monitors and power-cycles Bluetooth whenever any Bluetooth device connects, rather than only once after startup. |
 | **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle. |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
 | **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
@@ -97,11 +99,16 @@ The mod is engineered to meet strict system-stability and driver-safety requirem
 * **Toolchain:** Clang / LLVM (MinGW-w64 target) via the Windhawk Compiler suite
 * **Compiler Flags / Dependencies:** `-lole32 -loleaut32 -lruntimeobject -lshell32 -lwtsapi32`
 * **Windows Runtime APIs:** `Windows.Devices.Radios`, `Windows.Devices.Bluetooth`, `Windows.Devices.Enumeration`
-* **Resource Profile:** Zero idle CPU consumption; sleeps on OS event handles (`g_hStopEvent`, `g_hTriggerEvent`) when not cycling.
+* **Resource Profile:** Zero idle CPU consumption; sleeps on OS event handles (`g_hStopEvent`, `g_hTriggerEvent`, `g_hWakeEvent`) when not cycling, and operates with a light 1.5s background check interval when continuous monitoring is active.
 
 ---
 
 ## Changelog
+
+### v1.3.0
+* **Continuous Device Monitoring:** Added `toggleOnEveryDeviceConnection` setting to continuously monitor and power-cycle Bluetooth on every newly connected Bluetooth device throughout the session.
+* **Reconnection Loop Prevention:** Implemented smart post-cycle cooldown and connected device tracking to eliminate infinite toggle loops upon device reconnection.
+* **Device Discovery Optimization:** Consolidated Bluetooth classic and BLE queries into unified helper routines.
 
 ### v1.2.0
 * **Activation Modes:** Replaced `onlyWhenDeviceConnected` with `activationMode` option allowing users to toggle immediately at startup or only when a connected device is detected.
