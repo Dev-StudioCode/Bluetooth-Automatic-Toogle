@@ -1,9 +1,8 @@
 // ==WindhawkMod==
 // @id              bluetooth-auto-toggle
 // @name            Bluetooth Auto Toggle
-// @description     Automatically cycles Bluetooth off and back on in
-// milliseconds when a connected device is detected at startup
-// @version         1.2.0
+// @description     Automatically cycles Bluetooth off and back on in milliseconds when a connected device is detected at startup
+// @version         1.3.0
 // @author          Dev-StudioCode
 // @github          https://github.com/Dev-StudioCode
 // @include         windhawk.exe
@@ -31,9 +30,11 @@ back on in the background.
 ### Key Features
 - **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and
 back on at startup if active. If Bluetooth was OFF at boot, it listens for when
-you manually turn it ON later and instantly executes the fast toggle.
+you manually turn it ON later and automatically triggers the fast toggle cycle.
 - **Device-Aware Activation:** Optionally only cycles Bluetooth when a
 connected Bluetooth device (headset, mouse, keyboard, etc.) is found.
+- **Continuous Device Monitoring:** Optionally monitors for connected devices
+and cycles Bluetooth whenever any Bluetooth device connects throughout the day.
 - **Precise Millisecond Timing:** Configurable startup delay, post-connection
 delay, and off-to-on toggle duration in milliseconds.
 - **Dedicated Tool Mod Architecture:** Runs in an isolated `windhawk.exe`
@@ -53,16 +54,18 @@ reload, and instant cancellation on shutdown.
 
 ### Changelog
 
+- **v1.3.0**
+  - Added `toggleOnEveryDeviceConnection` setting to continuously monitor and power-cycle Bluetooth on every newly connected Bluetooth device.
+  - Added smart cooldown and connected device tracking to prevent infinite reconnection loops.
+  - Optimized device enumeration with unified classic and BLE queries.
 - **v1.2.0**
-  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON /
-OFF / Unchanged) at startup.
+  - Replaced `onlyWhenDeviceConnected` with `activationMode` (`deviceConnected` vs `startup`).
+  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON / OFF / Unchanged) at startup.
   - Added manual turn-on event detection if Bluetooth starts in an OFF state.
-  - Reordered initialization flow so radio state is verified before device
-connection checks.
+  - Reordered initialization flow so radio discovery and power state enforcement run before device connection checks.
 - **v1.1.0**
-  - Added `activationMode` option (`startup` vs `deviceConnected`).
-  - Added WTS session logon tracking to persist single-cycle state across
-restarts.
+  - Added `onlyWhenDeviceConnected` setting to only cycle when a connected device is detected.
+  - Added WTS session logon tracking to persist single-cycle state across restarts.
 - **v1.0.0**
   - Initial release.
 */
@@ -85,6 +88,10 @@ restarts.
   $options:
   - deviceConnected: Only when a device is connected
   - startup: On startup (cycle if ON, or on manual turn-on if OFF)
+
+- toggleOnEveryDeviceConnection: false
+  $name: Toggle on Every Device Connection
+  $description: Continuously monitors and power-cycles Bluetooth whenever any Bluetooth device connects, rather than only once after startup.
 
 - delayAfterDeviceConnectedMs: 2000
   $name: Delay After Device Found (ms)
@@ -129,6 +136,7 @@ restarts.
 #include <algorithm>
 #include <atomic>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -152,6 +160,7 @@ enum class ActivationMode { Startup, DeviceConnected };
 struct Settings {
   StartupBluetoothState startupBluetoothState;
   ActivationMode activationMode;
+  bool toggleOnEveryDeviceConnection;
   int delayAfterDeviceConnectedMs;
   int deviceWaitTimeoutSec;
   int startupDelayMs;
@@ -168,8 +177,14 @@ static SRWLOCK g_settingsLock = SRWLOCK_INIT;
 static HANDLE g_hWorkerThread = NULL;
 static HANDLE g_hStopEvent = NULL;
 static HANDLE g_hTriggerEvent = NULL;
+static HANDLE g_hWakeEvent = NULL;
 static std::atomic<bool> g_forceNextRun{false};
 static std::atomic<bool> g_isCycling{false};
+static std::atomic<bool> g_isInitialRun{true};
+static std::atomic<DWORD> g_lastCycleCompletedTick{0};
+
+static std::unordered_set<std::wstring> g_knownConnectedDeviceIds;
+static SRWLOCK g_connectedDevicesLock = SRWLOCK_INIT;
 
 struct RadioSubscription {
   Radio radio{nullptr};
@@ -218,6 +233,9 @@ static void LoadSettings() {
             : ActivationMode::DeviceConnected;
   }
 
+  g_settings.toggleOnEveryDeviceConnection =
+      Wh_GetIntSetting(L"toggleOnEveryDeviceConnection") != 0;
+
   g_settings.delayAfterDeviceConnectedMs =
       std::max(Wh_GetIntSetting(L"delayAfterDeviceConnectedMs"), 0);
 
@@ -239,7 +257,7 @@ static void LoadSettings() {
 
   ReleaseSRWLockExclusive(&g_settingsLock);
 
-  Wh_Log(L"Settings: startupState=%s, mode=%s, delayAfterConn=%dms, "
+  Wh_Log(L"Settings: startupState=%s, mode=%s, toggleEveryConn=%d, delayAfterConn=%dms, "
          L"waitTimeout=%ds, startupDelay=%dms, toggleDelay=%dms, onlyOnce=%d",
          g_settings.startupBluetoothState == StartupBluetoothState::Off
              ? L"off"
@@ -250,6 +268,7 @@ static void LoadSettings() {
          g_settings.activationMode == ActivationMode::Startup
              ? L"startup"
              : L"deviceConnected",
+         (int)g_settings.toggleOnEveryDeviceConnection,
          g_settings.delayAfterDeviceConnectedMs,
          g_settings.deviceWaitTimeoutSec, g_settings.startupDelayMs,
          g_settings.toggleDelayMs, (int)g_settings.onlyOncePerSession);
@@ -293,26 +312,38 @@ static void SetSessionMarker(PCWSTR prefix) {
   }
 }
 
-static bool GetFirstConnectedBluetoothDevice(std::wstring &outName) {
+static bool GetConnectedBluetoothDevices(
+    std::vector<std::pair<std::wstring, std::wstring>> &outDevices) {
+  outDevices.clear();
   try {
     auto aqsClassic = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(
         BluetoothConnectionStatus::Connected);
     auto devicesClassic = DeviceInformation::FindAllAsync(aqsClassic).get();
-    if (devicesClassic.Size() > 0) {
-      outName = devicesClassic.GetAt(0).Name().c_str();
-      return true;
+    for (uint32_t i = 0; i < devicesClassic.Size(); ++i) {
+      auto dev = devicesClassic.GetAt(i);
+      outDevices.emplace_back(dev.Id().c_str(), dev.Name().c_str());
     }
 
     auto aqsBle = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(
         BluetoothConnectionStatus::Connected);
     auto devicesBle = DeviceInformation::FindAllAsync(aqsBle).get();
-    if (devicesBle.Size() > 0) {
-      outName = devicesBle.GetAt(0).Name().c_str();
-      return true;
+    for (uint32_t i = 0; i < devicesBle.Size(); ++i) {
+      auto dev = devicesBle.GetAt(i);
+      outDevices.emplace_back(dev.Id().c_str(), dev.Name().c_str());
     }
+    return !outDevices.empty();
   } catch (const winrt::hresult_error &ex) {
     Wh_Log(L"Exception checking connected devices: 0x%08X (%s)",
            (unsigned int)ex.code(), ex.message().c_str());
+  }
+  return false;
+}
+
+static bool GetFirstConnectedBluetoothDevice(std::wstring &outName) {
+  std::vector<std::pair<std::wstring, std::wstring>> devices;
+  if (GetConnectedBluetoothDevices(devices) && !devices.empty()) {
+    outName = devices[0].second;
+    return true;
   }
   return false;
 }
@@ -323,14 +354,16 @@ static void PerformBluetoothToggle(bool isManualTest = false) {
   cfg = g_settings;
   ReleaseSRWLockShared(&g_settingsLock);
 
-  if (!isManualTest && cfg.onlyOncePerSession &&
-      HasSessionMarker(L"toggledLogon")) {
+  bool isInitial = g_isInitialRun.exchange(false);
+
+  if (!isManualTest && !cfg.toggleOnEveryDeviceConnection &&
+      cfg.onlyOncePerSession && HasSessionMarker(L"toggledLogon")) {
     Wh_Log(
         L"Bluetooth has already been toggled in this logon session. Skipping.");
     return;
   }
 
-  if (!isManualTest && cfg.startupDelayMs > 0) {
+  if (!isManualTest && isInitial && cfg.startupDelayMs > 0) {
     Wh_Log(L"Waiting initial startup delay of %d ms...", cfg.startupDelayMs);
     if (WaitForSingleObject(g_hStopEvent, cfg.startupDelayMs) ==
         WAIT_OBJECT_0) {
@@ -697,169 +730,181 @@ void WhTool_ModSettingsChanged() {
   }
 }
 
+// clang-format off
 ////////////////////////////////////////////////////////////////////////////////
 // Windhawk tool mod implementation for mods which don't need to inject to other
-// processes or hook other functions.
+// processes or hook other functions. Context:
+// https://github.com/ramensoftware/windhawk/wiki/Mods-as-tools:-Running-mods-in-a-dedicated-process
+//
+// The mod will load and run in a dedicated windhawk.exe process.
+//
+// Paste the code below as part of the mod code, and use these callbacks:
+// * WhTool_ModInit
+// * WhTool_ModSettingsChanged
+// * WhTool_ModUninit
+//
+// Currently, other callbacks are not supported.
 
 bool g_isToolModProcessLauncher;
 HANDLE g_toolModProcessMutex;
 
 void WINAPI EntryPoint_Hook() {
-  Wh_Log(L">");
-  ExitThread(0);
+    Wh_Log(L">");
+    ExitThread(0);
 }
 
 BOOL Wh_ModInit() {
-  DWORD sessionId;
-  if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) &&
-      sessionId == 0) {
-    return FALSE;
-  }
-
-  bool isExcluded = false;
-  bool isToolModProcess = false;
-  bool isCurrentToolModProcess = false;
-  int argc;
-  LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-  if (!argv) {
-    Wh_Log(L"CommandLineToArgvW failed");
-    return FALSE;
-  }
-
-  for (int i = 1; i < argc; i++) {
-    if (wcscmp(argv[i], L"-service") == 0 ||
-        wcscmp(argv[i], L"-service-start") == 0 ||
-        wcscmp(argv[i], L"-service-stop") == 0) {
-      isExcluded = true;
-      break;
-    }
-  }
-
-  for (int i = 1; i < argc - 1; i++) {
-    if (wcscmp(argv[i], L"-tool-mod") == 0) {
-      isToolModProcess = true;
-      if (wcscmp(argv[i + 1], WH_MOD_ID) == 0) {
-        isCurrentToolModProcess = true;
-      }
-      break;
-    }
-  }
-
-  LocalFree(argv);
-
-  if (isExcluded) {
-    return FALSE;
-  }
-
-  if (isCurrentToolModProcess) {
-    g_toolModProcessMutex =
-        CreateMutexW(nullptr, TRUE, L"windhawk-tool-mod_" WH_MOD_ID);
-    if (!g_toolModProcessMutex) {
-      Wh_Log(L"CreateMutex failed");
-      ExitProcess(1);
+    DWORD sessionId;
+    if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) &&
+        sessionId == 0) {
+        return FALSE;
     }
 
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
-      Wh_Log(L"Tool mod already running (%s)", WH_MOD_ID);
-      ExitProcess(1);
+    bool isExcluded = false;
+    bool isToolModProcess = false;
+    bool isCurrentToolModProcess = false;
+    int argc;
+    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) {
+        Wh_Log(L"CommandLineToArgvW failed");
+        return FALSE;
     }
 
-    if (!WhTool_ModInit()) {
-      ExitProcess(1);
+    for (int i = 1; i < argc; i++) {
+        if (wcscmp(argv[i], L"-service") == 0 ||
+            wcscmp(argv[i], L"-service-start") == 0 ||
+            wcscmp(argv[i], L"-service-stop") == 0) {
+            isExcluded = true;
+            break;
+        }
     }
 
-    IMAGE_DOS_HEADER *dosHeader = (IMAGE_DOS_HEADER *)GetModuleHandleW(nullptr);
-    IMAGE_NT_HEADERS *ntHeaders =
-        (IMAGE_NT_HEADERS *)((BYTE *)dosHeader + dosHeader->e_lfanew);
+    for (int i = 1; i < argc - 1; i++) {
+        if (wcscmp(argv[i], L"-tool-mod") == 0) {
+            isToolModProcess = true;
+            if (wcscmp(argv[i + 1], WH_MOD_ID) == 0) {
+                isCurrentToolModProcess = true;
+            }
+            break;
+        }
+    }
 
-    DWORD entryPointRVA = ntHeaders->OptionalHeader.AddressOfEntryPoint;
-    void *entryPoint = (BYTE *)dosHeader + entryPointRVA;
+    LocalFree(argv);
 
-    Wh_SetFunctionHook(entryPoint, (void *)EntryPoint_Hook, nullptr);
+    if (isExcluded) {
+        return FALSE;
+    }
+
+    if (isCurrentToolModProcess) {
+        g_toolModProcessMutex =
+            CreateMutexW(nullptr, TRUE, L"windhawk-tool-mod_" WH_MOD_ID);
+        if (!g_toolModProcessMutex) {
+            Wh_Log(L"CreateMutex failed");
+            ExitProcess(1);
+        }
+
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            Wh_Log(L"Tool mod already running (%s)", WH_MOD_ID);
+            ExitProcess(1);
+        }
+
+        if (!WhTool_ModInit()) {
+            ExitProcess(1);
+        }
+
+        IMAGE_DOS_HEADER *dosHeader = (IMAGE_DOS_HEADER *)GetModuleHandleW(nullptr);
+        IMAGE_NT_HEADERS *ntHeaders =
+            (IMAGE_NT_HEADERS *)((BYTE *)dosHeader + dosHeader->e_lfanew);
+
+        DWORD entryPointRVA = ntHeaders->OptionalHeader.AddressOfEntryPoint;
+        void *entryPoint = (BYTE *)dosHeader + entryPointRVA;
+
+        Wh_SetFunctionHook(entryPoint, (void *)EntryPoint_Hook, nullptr);
+        return TRUE;
+    }
+
+    if (isToolModProcess) {
+        return FALSE;
+    }
+
+    g_isToolModProcessLauncher = true;
     return TRUE;
-  }
-
-  if (isToolModProcess) {
-    return FALSE;
-  }
-
-  g_isToolModProcessLauncher = true;
-  return TRUE;
 }
 
 void Wh_ModAfterInit() {
-  if (!g_isToolModProcessLauncher) {
-    return;
-  }
-
-  WCHAR currentProcessPath[MAX_PATH];
-  switch (GetModuleFileNameW(nullptr, currentProcessPath,
-                             ARRAYSIZE(currentProcessPath))) {
-  case 0:
-  case ARRAYSIZE(currentProcessPath):
-    Wh_Log(L"GetModuleFileName failed");
-    return;
-  }
-
-  WCHAR commandLine[MAX_PATH + 2 +
-                    (sizeof(L" -tool-mod \"" WH_MOD_ID "\"") / sizeof(WCHAR)) -
-                    1];
-  swprintf_s(commandLine, L"\"%s\" -tool-mod \"%s\"", currentProcessPath,
-             WH_MOD_ID);
-
-  HMODULE kernelModule = GetModuleHandleW(L"kernelbase.dll");
-  if (!kernelModule) {
-    kernelModule = GetModuleHandleW(L"kernel32.dll");
-    if (!kernelModule) {
-      Wh_Log(L"No kernelbase.dll/kernel32.dll");
-      return;
+    if (!g_isToolModProcessLauncher) {
+        return;
     }
-  }
 
-  using CreateProcessInternalW_t = BOOL(WINAPI *)(
-      HANDLE hUserToken, LPCWSTR lpApplicationName, LPWSTR lpCommandLine,
-      LPSECURITY_ATTRIBUTES lpProcessAttributes,
-      LPSECURITY_ATTRIBUTES lpThreadAttributes, WINBOOL bInheritHandles,
-      DWORD dwCreationFlags, LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory,
-      LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation,
-      PHANDLE hRestrictedUserToken);
-  CreateProcessInternalW_t pCreateProcessInternalW =
-      (CreateProcessInternalW_t)GetProcAddress(kernelModule,
-                                               "CreateProcessInternalW");
-  if (!pCreateProcessInternalW) {
-    Wh_Log(L"No CreateProcessInternalW");
-    return;
-  }
+    WCHAR currentProcessPath[MAX_PATH];
+    switch (GetModuleFileNameW(nullptr, currentProcessPath,
+                               ARRAYSIZE(currentProcessPath))) {
+    case 0:
+    case ARRAYSIZE(currentProcessPath):
+        Wh_Log(L"GetModuleFileName failed");
+        return;
+    }
 
-  STARTUPINFOW si{
-      .cb = sizeof(STARTUPINFOW),
-      .dwFlags = STARTF_FORCEOFFFEEDBACK,
-  };
-  PROCESS_INFORMATION pi;
-  if (!pCreateProcessInternalW(nullptr, currentProcessPath, commandLine,
-                               nullptr, nullptr, FALSE, NORMAL_PRIORITY_CLASS,
-                               nullptr, nullptr, &si, &pi, nullptr)) {
-    Wh_Log(L"CreateProcess failed");
-    return;
-  }
+    WCHAR commandLine[MAX_PATH + 2 +
+                      (sizeof(L" -tool-mod \"" WH_MOD_ID "\"") / sizeof(WCHAR)) -
+                      1];
+    swprintf_s(commandLine, L"\"%s\" -tool-mod \"%s\"", currentProcessPath,
+               WH_MOD_ID);
 
-  CloseHandle(pi.hProcess);
-  CloseHandle(pi.hThread);
+    HMODULE kernelModule = GetModuleHandleW(L"kernelbase.dll");
+    if (!kernelModule) {
+        kernelModule = GetModuleHandleW(L"kernel32.dll");
+        if (!kernelModule) {
+            Wh_Log(L"No kernelbase.dll/kernel32.dll");
+            return;
+        }
+    }
+
+    using CreateProcessInternalW_t = BOOL(WINAPI *)(
+        HANDLE hUserToken, LPCWSTR lpApplicationName, LPWSTR lpCommandLine,
+        LPSECURITY_ATTRIBUTES lpProcessAttributes,
+        LPSECURITY_ATTRIBUTES lpThreadAttributes, WINBOOL bInheritHandles,
+        DWORD dwCreationFlags, LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory,
+        LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation,
+        PHANDLE hRestrictedUserToken);
+    CreateProcessInternalW_t pCreateProcessInternalW =
+        (CreateProcessInternalW_t)GetProcAddress(kernelModule,
+                                                 "CreateProcessInternalW");
+    if (!pCreateProcessInternalW) {
+        Wh_Log(L"No CreateProcessInternalW");
+        return;
+    }
+
+    STARTUPINFOW si{
+        .cb = sizeof(STARTUPINFOW),
+        .dwFlags = STARTF_FORCEOFFFEEDBACK,
+    };
+    PROCESS_INFORMATION pi;
+    if (!pCreateProcessInternalW(nullptr, currentProcessPath, commandLine,
+                                 nullptr, nullptr, FALSE, NORMAL_PRIORITY_CLASS,
+                                 nullptr, nullptr, &si, &pi, nullptr)) {
+        Wh_Log(L"CreateProcess failed");
+        return;
+    }
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 }
 
 void Wh_ModSettingsChanged() {
-  if (g_isToolModProcessLauncher) {
-    return;
-  }
+    if (g_isToolModProcessLauncher) {
+        return;
+    }
 
-  WhTool_ModSettingsChanged();
+    WhTool_ModSettingsChanged();
 }
 
 void Wh_ModUninit() {
-  if (g_isToolModProcessLauncher) {
-    return;
-  }
+    if (g_isToolModProcessLauncher) {
+        return;
+    }
 
-  WhTool_ModUninit();
-  ExitProcess(0);
+    WhTool_ModUninit();
+    ExitProcess(0);
 }
+// clang-format on
