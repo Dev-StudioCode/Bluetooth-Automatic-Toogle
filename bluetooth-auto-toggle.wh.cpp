@@ -1,7 +1,8 @@
 // ==WindhawkMod==
 // @id              bluetooth-auto-toggle
 // @name            Bluetooth Auto Toggle
-// @description     Automatically cycles Bluetooth off and back on in milliseconds when a connected device is detected at startup
+// @description     Automatically cycles Bluetooth off and back on in
+// milliseconds when a connected device is detected at startup
 // @version         1.3.0
 // @author          Dev-StudioCode
 // @github          https://github.com/Dev-StudioCode
@@ -55,17 +56,26 @@ reload, and instant cancellation on shutdown.
 ### Changelog
 
 - **v1.3.0**
-  - Added `toggleOnEveryDeviceConnection` setting to continuously monitor and power-cycle Bluetooth on every newly connected Bluetooth device throughout the session.
-  - Event-driven device monitoring using Windows Runtime `DeviceWatcher` (`System.Devices.Aep.IsConnected`) for zero idle CPU overhead.
-  - Tracks devices dropped during radio cycling (`g_droppedByCycle`) so subsequent reconnection of active devices does not trigger redundant cycles.
+  - Added `toggleOnEveryDeviceConnection` setting to continuously monitor and
+power-cycle Bluetooth on every newly connected Bluetooth device throughout the
+session.
+  - Event-driven device monitoring using Windows Runtime `DeviceWatcher`
+(`System.Devices.Aep.IsConnected`) for zero idle CPU overhead.
+  - Tracks devices dropped during radio cycling (`g_droppedByCycle`) so
+subsequent reconnection of active devices does not trigger redundant cycles.
 - **v1.2.0**
-  - Replaced `onlyWhenDeviceConnected` with `activationMode` (`deviceConnected` vs `startup`).
-  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON / OFF / Unchanged) at startup.
+  - Replaced `onlyWhenDeviceConnected` with `activationMode` (`deviceConnected`
+vs `startup`).
+  - Added `startupBluetoothState` setting to enforce Bluetooth power state (ON /
+OFF / Unchanged) at startup.
   - Added manual turn-on event detection if Bluetooth starts in an OFF state.
-  - Reordered initialization flow so radio discovery and power state enforcement run before device connection checks.
+  - Reordered initialization flow so radio discovery and power state enforcement
+run before device connection checks.
 - **v1.1.0**
-  - Added `onlyWhenDeviceConnected` setting to only cycle when a connected device is detected.
-  - Added WTS session logon tracking to persist single-cycle state across restarts.
+  - Added `onlyWhenDeviceConnected` setting to only cycle when a connected
+device is detected.
+  - Added WTS session logon tracking to persist single-cycle state across
+restarts.
 - **v1.0.0**
   - Initial release.
 */
@@ -204,7 +214,8 @@ static DeviceWatcher StartConnectionWatcher(winrt::hstring const &selector) {
         DeviceInformationKind::AssociationEndpoint);
 
     watcher.Added([](DeviceWatcher const &, DeviceInformation const &) {});
-    watcher.Removed([](DeviceWatcher const &, DeviceInformationUpdate const &) {});
+    watcher.Removed(
+        [](DeviceWatcher const &, DeviceInformationUpdate const &) {});
     watcher.Updated([](DeviceWatcher const &,
                        DeviceInformationUpdate const &update) {
       try {
@@ -355,7 +366,8 @@ static void LoadSettings() {
 
   ReleaseSRWLockExclusive(&g_settingsLock);
 
-  Wh_Log(L"Settings: startupState=%s, mode=%s, toggleEveryConn=%d, delayAfterConn=%dms, "
+  Wh_Log(L"Settings: startupState=%s, mode=%s, toggleEveryConn=%d, "
+         L"delayAfterConn=%dms, "
          L"waitTimeout=%ds, startupDelay=%dms, toggleDelay=%dms, onlyOnce=%d",
          g_settings.startupBluetoothState == StartupBluetoothState::Off
              ? L"off"
@@ -458,8 +470,8 @@ static void PerformBluetoothToggle(bool isManualTest = false,
   if (!isManualTest && cfg.onlyOncePerSession &&
       HasSessionMarker(L"toggledLogon")) {
     if (isInitial || !cfg.toggleOnEveryDeviceConnection) {
-      Wh_Log(
-          L"Bluetooth has already been toggled in this logon session. Skipping.");
+      Wh_Log(L"Bluetooth has already been toggled in this logon session. "
+             L"Skipping.");
       return;
     }
   }
@@ -593,8 +605,7 @@ static void PerformBluetoothToggle(bool isManualTest = false,
       try {
         winrt::event_token token =
             radio.StateChanged([onlyOnce = cfg.onlyOncePerSession,
-                                everyConn =
-                                    cfg.toggleOnEveryDeviceConnection](
+                                everyConn = cfg.toggleOnEveryDeviceConnection](
                                    Radio const &sender, auto const &) {
               try {
                 if (sender.State() == RadioState::On) {
@@ -638,9 +649,10 @@ static void PerformBluetoothToggle(bool isManualTest = false,
         if (cfg.deviceWaitTimeoutSec > 0) {
           DWORD elapsedSec = (GetTickCount() - startTick) / 1000;
           if (elapsedSec >= (DWORD)cfg.deviceWaitTimeoutSec) {
-            Wh_Log(L"No Bluetooth device connected within timeout window (%d s). "
-                   L"Skipping toggle.",
-                   cfg.deviceWaitTimeoutSec);
+            Wh_Log(
+                L"No Bluetooth device connected within timeout window (%d s). "
+                L"Skipping toggle.",
+                cfg.deviceWaitTimeoutSec);
             return;
           }
         }
