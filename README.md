@@ -2,7 +2,7 @@
 
 [![Windhawk Mod](https://img.shields.io/badge/Windhawk-Mod-0078D6.svg)](https://windhawk.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.3.0-green.svg)](#specifications)
+[![Version](https://img.shields.io/badge/Version-1.4.0-green.svg)](#specifications)
 [![Architecture](https://img.shields.io/badge/Architecture-x64-success.svg)](#specifications)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -26,7 +26,8 @@ On Windows 10 and 11 systems especially those utilizing Fast Startup Bluetooth a
 
 * **Startup & Manual Turn-On Cycle:** Automatically cycles Bluetooth off and back on at startup if active. If Bluetooth was OFF during boot, the mod listens for when you manually turn it ON later and automatically triggers the fast toggle cycle.
 * **Device-Aware Activation:** Evaluates device connectivity before initiating cycling, ensuring that idle systems without connected peripherals are not cycled unnecessarily.
-* **Continuous Device Monitoring:** Optionally monitors for connected devices and cycles Bluetooth whenever any Bluetooth device connects throughout the day.
+* **Continuous Device Monitoring:** Optionally monitors for connected devices and cycles Bluetooth whenever any eligible Bluetooth device connects throughout the day.
+* **Per-Device Target Filtering:** Supports allowing all connected Bluetooth devices by default or restricting auto-toggle initiation to selected devices using flexible keyword and token matching (explicit allowlist or blocklist rules).
 * **Configurable Post-Connection Settle Delay:** Introduces a configurable delay (default: 2,000 ms) after device detection to ensure the driver stack and profile layers have settled before executing the toggle.
 * **Millisecond Precision Control:** Provides granular configuration over startup settle timing, discovery retry intervals, and radio off-to-on duration in milliseconds.
 * **Isolated Tool Mod Architecture:** Executes inside an isolated, dedicated `windhawk.exe` background process using official Windhawk tool mod conventions, preventing any injection into `explorer.exe` or the Windows desktop shell.
@@ -59,7 +60,9 @@ Settings can be customized directly within the mod details view in Windhawk:
 | :--- | :---: | :--- |
 | **Startup Bluetooth State** | `unchanged` | Initial power state enforcement at startup: force Bluetooth ON (`on`, ensures Bluetooth is active at startup even if turned off before shutdown), force Bluetooth OFF (`off`, stays OFF and automatically executes the fast toggle when you manually turn it back on later), or leave unchanged (`unchanged`, retains Windows state). |
 | **Activation Mode** | `deviceConnected` | Mode selection: on startup (`startup`, cycles if ON, or triggers on manual turn-on if OFF at boot), or only after a connected Bluetooth device is detected (`deviceConnected`). |
-| **Toggle on Every Device Connection** | `false` | Continuously monitors and cycles Bluetooth whenever any Bluetooth device connects throughout the session (briefly power-cycling the radio and disconnecting active devices). Overrides single-cycle limit for new device connections. |
+| **Toggle on Every Device Connection** | `false` | Continuously monitors and cycles Bluetooth whenever any eligible Bluetooth device connects throughout the session (briefly power-cycling the radio and disconnecting active devices). Overrides single-cycle limit for new device connections. |
+| **Apply to all devices by default** | `true` | If enabled, any connected Bluetooth device without a matching rule can initiate the auto-toggle. Disable this to only trigger for enabled devices in Target Devices List. |
+| **Target Devices List** | `[]` | Filter specific Bluetooth devices by name or keyword (e.g., `Sony`, `AirPods`, `WH-1000XM4`) with an individual `Enable Auto-Toggle` switch per rule. Rules are evaluated top-to-bottom and the first matching rule wins. |
 | **Delay After Device Found (ms)** | `2000` | Settle time in milliseconds to wait after device detection before initiating the power cycle (applied in device-connected mode and to connection-triggered runs). |
 | **Device Connection Wait Timeout (seconds)** | `60` | Maximum time window to wait for a device to connect after boot (`0` waits indefinitely until a device is detected). |
 | **Startup Settle Delay (ms)** | `2000` | Initial hold time after tool launch before polling hardware, ensuring kernel driver stabilization. |
@@ -104,6 +107,11 @@ The mod is engineered to meet strict system-stability and driver-safety requirem
 ---
 
 ## Changelog
+
+### v1.4.0
+* **Per-Device Target Filtering:** Added `applyToAllDevices` (enabled by default) and `targetDevices` list settings so users can selectively allow or exclude specific Bluetooth devices from initiating an auto-toggle.
+* **Smart Device Matching:** Implemented case-insensitive substring and token matching with stop-word filtering, evaluated top-to-bottom where the first matching rule wins.
+* **Filter-Aware Startup & Event Watcher:** Updated both startup `deviceConnected` detection and runtime `DeviceWatcher` monitoring to evaluate per-device rules, ignore excluded peripherals, and avoid redundant settle delays on connection-triggered runs.
 
 ### v1.3.0
 * **Continuous Device Monitoring:** Added `toggleOnEveryDeviceConnection` setting to continuously monitor and power-cycle Bluetooth on every newly connected Bluetooth device throughout the session.
